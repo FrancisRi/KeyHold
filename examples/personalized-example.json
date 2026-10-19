@@ -1,0 +1,36 @@
+{
+  "Version": 2,
+  "Name": "个性化示例（请先重新取点）",
+  "SuppressKeys": true,
+  "PauseOnFocusLoss": true,
+  "Macros": [
+    {
+      "Enabled": true,
+      "Key": "X",
+      "X": 500,
+      "Y": 400,
+      "Label": "点按 1，松开后隔 10ms，再执行原坐标；支持短按 X",
+      "MouseMode": "Hold",
+      "MainDurationMs": 40,
+      "AfterMainDelayMs": 40,
+      "BeforeActions": [
+        { "Kind": "KeyTap", "Key": "1", "X": 0, "Y": 0, "DurationMs": 40, "DelayAfterMs": 10 }
+      ],
+      "AfterActions": []
+    },
+    {
+      "Enabled": true,
+      "Key": "C",
+      "X": 500,
+      "Y": 400,
+      "Label": "先点击原坐标，再点击额外坐标；支持短按 C",
+      "MouseMode": "Click",
+      "MainDurationMs": 40,
+      "AfterMainDelayMs": 40,
+      "BeforeActions": [],
+      "AfterActions": [
+        { "Kind": "Click", "Key": "1", "X": 800, "Y": 400, "DurationMs": 40, "DelayAfterMs": 0 }
+      ]
+    }
+  ]
+}

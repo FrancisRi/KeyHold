@@ -1,0 +1,1 @@
+{"Version":1,"Name":"示例配置（请先修改坐标）","SuppressKeys":true,"PauseOnFocusLoss":true,"Macros":[{"Enabled":true,"Key":"A","X":500,"Y":400,"Label":"示例目标一"},{"Enabled":true,"Key":"S","X":800,"Y":400,"Label":"示例目标二"}]}

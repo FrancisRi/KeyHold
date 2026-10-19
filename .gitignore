@@ -1,0 +1,32 @@
+# Generated programs and test binaries (publish programs as release assets).
+*.exe
+*.pdb
+*.dll
+*.zip
+*.sha256
+*.log
+*.bak
+/.build/
+/dist/
+/bin/
+/obj/
+
+# Editor and local assistant state.
+/.vs/
+/.vscode/
+/.idea/
+/.codex/
+/.agents/
+*.user
+*.suo
+/AGENTS.md
+/Open-In-Codex.cmd
+
+# Publish reviewed screenshots only; keep local diagnostic captures private.
+/docs/*
+!/docs/screenshots/
+!/docs/screenshots/**
+
+# Local profiles belong outside the source tree.
+/Profiles/
+/profiles/
