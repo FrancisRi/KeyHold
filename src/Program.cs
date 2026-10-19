@@ -8,8 +8,8 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("KeyHold")]
 [assembly: System.Reflection.AssemblyProduct("KeyHold")]
-[assembly: System.Reflection.AssemblyVersion("0.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.2.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.2.1.0")]
 
 namespace KeyHoldMacro
 {
@@ -70,14 +70,14 @@ namespace KeyHoldMacro
         private readonly KeyboardWorker worker;
         private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
         private readonly NotifyIcon tray = new NotifyIcon();
-        private readonly DataGridView grid = new DataGridView();
+        private readonly DataGridView grid = new FluentGrid();
         private readonly ComboBox profiles = new FluentComboBox();
         private readonly TextBox name = new TextBox();
         private readonly CheckBox suppress = new FluentToggle(), pauseFocus = new FluentToggle();
         private readonly Label status = new Label(), cursor = new Label(), picked = new Label();
         private readonly Button start = new FluentButton { Tone = FluentButtonTone.Primary };
         private readonly Label runState = new Label();
-        private readonly TableLayoutPanel settings = new TableLayoutPanel();
+        private readonly TableLayoutPanel settings = new FluentTableLayoutPanel();
         private readonly ComboBox language = new FluentComboBox();
         private readonly bool previewOnly;
         internal string NextLanguage { get; private set; }
@@ -85,6 +85,8 @@ namespace KeyHoldMacro
         private string currentPath, loadedName;
         private int captureRow, countdown, countdownVersion;
         private DateTime startAt;
+        private Point? lastCursor;
+        private Rectangle lastDesktop;
         private MacroEditor editing;
         private Action<int, int> actionPoint;
         public MainForm() : this(false) { }
@@ -125,12 +127,12 @@ namespace KeyHoldMacro
         }
         private FlowLayoutPanel Flow()
         {
-            FlowLayoutPanel p = new FlowLayoutPanel(); p.Dock = DockStyle.Fill;
+            FlowLayoutPanel p = new FluentFlowLayoutPanel(); p.Dock = DockStyle.Fill;
             p.WrapContents = false; p.Padding = new Padding(0); p.Margin = new Padding(0); p.BackColor = Color.Transparent; return p;
         }
         private void BuildUI()
         {
-            TableLayoutPanel root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 20, 28, 20), ColumnCount = 1, RowCount = 5 };
+            TableLayoutPanel root = new FluentTableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 20, 28, 20), ColumnCount = 1, RowCount = 5 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 62));
@@ -138,7 +140,7 @@ namespace KeyHoldMacro
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             Controls.Add(root);
 
-            TableLayoutPanel heading = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 3, Margin = new Padding(0, 0, 0, 18) };
+            TableLayoutPanel heading = new FluentTableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 3, Margin = new Padding(0, 0, 0, 18) };
             heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); heading.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 340));
             heading.RowStyles.Add(new RowStyle(SizeType.AutoSize)); heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Label title = FluentUi.Text(L.T("宏配置"), 25F, false); title.Font = FluentUi.Font(25F, FontStyle.Bold);
@@ -177,7 +179,7 @@ namespace KeyHoldMacro
             root.Controls.Add(settings, 0, 1);
 
             FluentCard profileCard = new FluentCard { Dock = DockStyle.Fill };
-            TableLayoutPanel profileBody = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Margin = new Padding(0) };
+            TableLayoutPanel profileBody = new FluentTableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Margin = new Padding(0) };
             profileBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 25));
             profileBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
             profileBody.RowStyles.Add(new RowStyle(SizeType.Absolute, 43));
@@ -201,7 +203,7 @@ namespace KeyHoldMacro
             profileBody.Controls.Add(p, 0, 2); profileCard.Controls.Add(profileBody); settings.Controls.Add(profileCard, 0, 0);
 
             FluentCard mappingCard = new FluentCard { Dock = DockStyle.Fill, Padding = new Padding(12, 10, 12, 8), Margin = new Padding(0, 0, 0, 4) };
-            TableLayoutPanel mapping = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = new Padding(0) };
+            TableLayoutPanel mapping = new FluentTableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1, Margin = new Padding(0) };
             mapping.RowStyles.Add(new RowStyle(SizeType.Absolute, 34)); mapping.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             Label mappingTitle = FluentUi.Text(L.T("键位映射"), 12F, false); mappingTitle.Padding = new Padding(4, 0, 0, 0); mapping.Controls.Add(mappingTitle, 0, 0);
             grid.Dock = DockStyle.Fill; grid.Margin = new Padding(0); grid.AllowUserToAddRows = false; grid.AllowUserToDeleteRows = false;
@@ -240,7 +242,7 @@ namespace KeyHoldMacro
             settings.Controls.Add(p, 0, 2);
 
             FluentCard behaviorCard = new FluentCard { Dock = DockStyle.Fill, Padding = new Padding(16, 10, 16, 8), Margin = new Padding(0, 0, 0, 6) };
-            TableLayoutPanel behavior = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+            TableLayoutPanel behavior = new FluentTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
             behavior.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); behavior.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             FlowLayoutPanel toggles = Flow(); suppress.Text = L.T("拦截宏按键（不传给目标应用）"); suppress.Width = 340;
             pauseFocus.Text = L.T("切换前台窗口时自动暂停"); pauseFocus.Width = L.Language == "en" ? 380 : 310;
@@ -311,7 +313,10 @@ namespace KeyHoldMacro
         private void Tick(object sender, EventArgs args)
         {
             Native.POINT p;
-            if (Native.GetCursorPos(out p)) cursor.Text = L.F("当前鼠标坐标：X = {0}    Y = {1}    |    当前桌面：{2}", p.x, p.y, Native.Desktop);
+            // Keep processing worker events while hidden, but do not repaint an
+            // invisible window or repeatedly format an unchanged cursor label.
+            if (Visible && WindowState != FormWindowState.Minimized && Native.GetCursorPos(out p))
+                UpdateCursor(p.x, p.y, Native.Desktop);
             WorkerEvent e;
             while (worker.Events.TryDequeue(out e))
             {
@@ -362,6 +367,13 @@ namespace KeyHoldMacro
                     catch (Exception ex) { Error(ex.Message); }
                 }
             }
+        }
+        private void UpdateCursor(int x, int y, Rectangle desktop)
+        {
+            Point point = new Point(x, y);
+            if (lastCursor == point && lastDesktop == desktop) return;
+            lastCursor = point; lastDesktop = desktop;
+            cursor.Text = L.F("当前鼠标坐标：X = {0}    Y = {1}    |    当前桌面：{2}", x, y, desktop);
         }
         private void CancelCountdown() { countdown = 0; start.Text = L.T("3 秒后启用并最小化"); }
         public void EmergencyStop()

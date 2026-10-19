@@ -69,18 +69,9 @@ namespace KeyHoldMacro
             }
             SystemEvents.UserPreferenceChanged += PreferenceChanged;
         }
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams parameters = base.CreateParams;
-                // Form.DoubleBuffered does not buffer the child HWNDs. Compose
-                // the whole tree so their initial clears are never presented
-                // as a top-to-bottom white sweep on the desktop.
-                parameters.ExStyle |= 0x02000000; // WS_EX_COMPOSITED
-                return parameters;
-            }
-        }
+        // Buffer each managed surface locally. WS_EX_COMPOSITED on the form
+        // couples every child HWND (including native editors and scrollbars) to
+        // one presentation cycle and can expose intermediate frames on hover.
         protected override void OnHandleCreated(EventArgs e)
         { base.OnHandleCreated(e); ApplyNativeFrame(); }
         protected override void OnShown(EventArgs e)
@@ -132,6 +123,21 @@ namespace KeyHoldMacro
         }
     }
 
+    internal sealed class FluentTableLayoutPanel : TableLayoutPanel
+    {
+        public FluentTableLayoutPanel() { DoubleBuffered = true; }
+    }
+
+    internal sealed class FluentFlowLayoutPanel : FlowLayoutPanel
+    {
+        public FluentFlowLayoutPanel() { DoubleBuffered = true; }
+    }
+
+    internal sealed class FluentGrid : DataGridView
+    {
+        public FluentGrid() { DoubleBuffered = true; }
+    }
+
     internal enum FluentButtonTone { Standard, Primary, Subtle, Danger, Selected }
 
     internal sealed class FluentButton : Button
@@ -141,9 +147,8 @@ namespace KeyHoldMacro
         public FluentButton()
         {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            SetStyle(ControlStyles.SupportsTransparentBackColor, true);
             FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0;
-            UseVisualStyleBackColor = false; BackColor = Color.Transparent; Height = 36; Cursor = Cursors.Hand;
+            UseVisualStyleBackColor = false; Height = 36; Cursor = Cursors.Hand;
             Margin = new Padding(0, 3, 8, 3);
         }
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -206,7 +211,7 @@ namespace KeyHoldMacro
 
     internal sealed class FluentToggle : CheckBox
     {
-        public FluentToggle() { AutoSize = false; Size = new Size(310, 32); Cursor = Cursors.Hand; DoubleBuffered = true; }
+        public FluentToggle() { SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true); AutoSize = false; Size = new Size(310, 32); Cursor = Cursors.Hand; DoubleBuffered = true; }
         protected override void OnPaint(PaintEventArgs e)
         {
             FluentPalette p = FluentUi.PaletteFor(this);
@@ -320,6 +325,17 @@ namespace KeyHoldMacro
         { public int Size; public NativeRect Item, Button; public int State; public IntPtr Combo, Edit, List; }
         [DllImport("user32.dll")]
         private static extern bool GetComboBoxInfo(IntPtr window, ref ComboInfo info);
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PaintInfo
+        {
+            public IntPtr DC;
+            public int Erase;
+            public NativeRect Bounds;
+            public int Restore, Update;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] Reserved;
+        }
+        [DllImport("user32.dll")] private static extern IntPtr BeginPaint(IntPtr window, out PaintInfo paint);
+        [DllImport("user32.dll")] private static extern bool EndPaint(IntPtr window, ref PaintInfo paint);
         private FluentComboSupport(ComboBox control)
         {
             combo = control; popup = new FluentNativeChrome(control, true);
@@ -356,11 +372,30 @@ namespace KeyHoldMacro
         }
         protected override void WndProc(ref Message m)
         {
+            if (combo.DropDownStyle != ComboBoxStyle.DropDownList || !combo.IsHandleCreated)
+            { base.WndProc(ref m); return; }
+            if (m.Msg == 0x14) // WM_ERASEBKGND: the buffered face covers its background.
+            { m.Result = new IntPtr(1); return; }
+            if (m.Msg == 0xF) // WM_PAINT: never expose the native face before ours.
+            {
+                IntPtr window = Handle;
+                PaintInfo paint;
+                IntPtr dc = BeginPaint(window, out paint);
+                try
+                {
+                    if (dc != IntPtr.Zero && combo.ClientSize.Width > 0 && combo.ClientSize.Height > 0)
+                        using (Graphics target = Graphics.FromHdc(dc))
+                        using (BufferedGraphics buffer = BufferedGraphicsManager.Current.Allocate(target, combo.ClientRectangle))
+                        {
+                            FluentComboBox.PaintFace(combo, buffer.Graphics);
+                            buffer.Render(target);
+                        }
+                }
+                finally { EndPaint(window, ref paint); }
+                m.Result = IntPtr.Zero; return;
+            }
             base.WndProc(ref m);
-            if (combo.DropDownStyle != ComboBoxStyle.DropDownList || !combo.IsHandleCreated) return;
-            if (m.Msg == 0xF)
-                using (Graphics g = Graphics.FromHwnd(Handle)) FluentComboBox.PaintFace(combo, g);
-            else if ((m.Msg == 0x318 || m.Msg == 0x317) && m.WParam != IntPtr.Zero)
+            if ((m.Msg == 0x318 || m.Msg == 0x317) && m.WParam != IntPtr.Zero)
                 using (Graphics g = Graphics.FromHdc(m.WParam)) FluentComboBox.PaintFace(combo, g);
         }
     }
@@ -463,13 +498,13 @@ namespace KeyHoldMacro
     {
         private readonly System.Collections.Generic.List<Control> pages = new System.Collections.Generic.List<Control>();
         private readonly System.Collections.Generic.List<FluentButton> buttons = new System.Collections.Generic.List<FluentButton>();
-        private readonly FlowLayoutPanel navigation = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
+        private readonly FlowLayoutPanel navigation = new FluentFlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0) };
         private readonly FluentCard content = new FluentCard { Dock = DockStyle.Fill, Padding = new Padding(1), Margin = new Padding(0) };
         private int selectedIndex = -1;
         public event EventHandler SelectedIndexChanged;
         public FluentTabs()
         {
-            TableLayoutPanel root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+            TableLayoutPanel root = new FluentTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.Controls.Add(navigation, 0, 0); root.Controls.Add(content, 0, 1); Controls.Add(root);
         }
@@ -532,7 +567,9 @@ namespace KeyHoldMacro
         public static void Apply(Control control, FluentPalette p)
         {
             if (control is FluentCard || control is FluentTextField) control.BackColor = p.Surface;
-            else if (control is Label) control.ForeColor = Convert.ToString(control.Tag) == "muted" ? p.Muted : p.Text;
+            else if (control is Label)
+            { control.BackColor = ParentColor(control); control.ForeColor = Convert.ToString(control.Tag) == "muted" ? p.Muted : p.Text; }
+            else if (control is FluentButton || control is FluentToggle) control.BackColor = ParentColor(control);
             else if (control is TextBox || control is ComboBox || control is NumericUpDown)
             {
                 control.BackColor = p.Surface; control.ForeColor = p.Text;
@@ -544,7 +581,7 @@ namespace KeyHoldMacro
             else if (control is ScrollBar) FluentNativeChrome.Watch(control);
             else if (control is TabPage) { control.BackColor = p.Surface; control.ForeColor = p.Text; }
             else if (control is DataGridView) StyleGrid((DataGridView)control, p);
-            else if (control is Panel) control.BackColor = Color.Transparent;
+            else if (control is Panel) control.BackColor = ParentColor(control);
             foreach (Control child in control.Controls) Apply(child, p);
             FluentTextField field = control as FluentTextField;
             if (field != null) field.RefreshAppearance();

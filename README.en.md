@@ -68,9 +68,9 @@ cd KeyHold
 
 The scripts use the .NET Framework C# compiler included with Windows and pause before returning. Visual Studio, Python and AutoHotkey are not required.
 
-The default suites perform **778 checks**: 246 core/sequence, 20 worker and 512 UI checks. They use fake input and install no real keyboard hooks or simulated mouse/keyboard input. UI checks need a Windows desktop and cover both languages, themes and minimum-window command layouts. Language preference tests use temporary files. Existing version 1/2 JSON profiles remain compatible.
+The default suites perform **802 checks**: 246 core/sequence, 20 worker and 536 UI checks. They use fake input and install no real keyboard hooks or simulated mouse/keyboard input. UI checks need a Windows desktop and cover both languages, themes and minimum-window command layouts. Language preference tests use temporary files. Existing version 1/2 JSON profiles remain compatible.
 
-Optional desktop checks are separate from `Test.cmd`: `ScrollInteractionTests.cs` moves the real cursor only inside its own preview; `StartupPaintTests.cs` displays preview windows and captures startup frames. Both use previews without macro listeners.
+Optional desktop checks are separate from `Test.cmd`: `ScrollInteractionTests.cs` moves the real cursor only inside its own preview; `StartupPaintTests.cs` displays preview windows and captures startup and restore/hover frames after key selection and a borderless fullscreen cover (not an exclusive display-mode switch). Both use previews without macro listeners.
 
 Profiles remain in `%LOCALAPPDATA%\KeyHoldMacro\Profiles` for compatibility. The language choice is stored separately in `%LOCALAPPDATA%\KeyHoldMacro\language.txt`. The `KeyHoldMacro` source namespace and single-instance mutex are also preserved.
 

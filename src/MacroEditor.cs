@@ -25,7 +25,7 @@ namespace KeyHoldMacro
             Text = L.F("KeyHold · {0} 个性化设置", macro.Key);
             ClientSize = new Size(1140, 820); MinimumSize = new Size(1000, 720);
             StartPosition = FormStartPosition.CenterParent;
-            TableLayoutPanel root = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16), ColumnCount = 1, RowCount = 6 };
+            TableLayoutPanel root = new FluentTableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24, 20, 24, 16), ColumnCount = 1, RowCount = 6 };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 162));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 66));
@@ -33,13 +33,13 @@ namespace KeyHoldMacro
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 38));
             root.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             Controls.Add(root);
-            TableLayoutPanel heading = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, 16) };
+            TableLayoutPanel heading = new FluentTableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 0, 16) };
             heading.RowStyles.Add(new RowStyle(SizeType.AutoSize)); heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Label title = FluentUi.Text(L.F("个性化 · {0}", macro.Key), 24F, false); title.Font = FluentUi.Font(24F, FontStyle.Bold);
             heading.Controls.Add(title, 0, 0); heading.Controls.Add(FluentUi.Text(L.T("为这个按键编排动作与节奏。"), 10F, true), 0, 1); root.Controls.Add(heading, 0, 0);
 
             FluentCard mainCard = new FluentCard { Dock = DockStyle.Fill };
-            TableLayoutPanel options = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3, Margin = new Padding(0) };
+            TableLayoutPanel options = new FluentTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3, Margin = new Padding(0) };
             options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44)); options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25)); options.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31));
             options.RowStyles.Add(new RowStyle(SizeType.Absolute, 28)); options.RowStyles.Add(new RowStyle(SizeType.Absolute, 44)); options.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             options.Controls.Add(FluentUi.Text(L.F("原坐标动作  ({0}, {1})", macro.X, macro.Y), 10F, false), 0, 0);
@@ -62,7 +62,7 @@ namespace KeyHoldMacro
             note.Dock = DockStyle.Fill; note.Tag = "muted"; note.Font = FluentUi.Font(9F, FontStyle.Regular); note.Padding = new Padding(0, 10, 0, 0);
             note.Text = L.T("每组最多 10 个动作。选中坐标动作后可按 F6 在目标应用中取点，不会抢回焦点。");
             root.Controls.Add(note, 0, 4);
-            FlowLayoutPanel commands = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 9, 0, 0), Margin = new Padding(0) };
+            FlowLayoutPanel commands = new FluentFlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0, 9, 0, 0), Margin = new Padding(0) };
             Button save = Button(L.T("应用到该键位"), delegate { Apply(); }, 152); ((FluentButton)save).Tone = FluentButtonTone.Primary;
             Button close = Button(L.T("取消"), delegate { DialogResult = DialogResult.Cancel; Close(); }, 100);
             commands.Controls.Add(close); commands.Controls.Add(save); root.Controls.Add(commands, 0, 5); CancelButton = close;
@@ -101,7 +101,7 @@ namespace KeyHoldMacro
         }
         private static DataGridView NewGrid()
         {
-            DataGridView grid = new DataGridView { Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
+            DataGridView grid = new FluentGrid { Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false, MultiSelect = false, RowHeadersVisible = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
             FluentUi.ConfigureGrid(grid);
@@ -142,10 +142,10 @@ namespace KeyHoldMacro
         private Panel Page(string text, DataGridView grid)
         {
             Panel page = new Panel { Text = text, Padding = new Padding(12, 10, 12, 8) };
-            TableLayoutPanel body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
+            TableLayoutPanel body = new FluentTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
             body.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); body.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             page.Controls.Add(body); body.Controls.Add(grid, 0, 0);
-            FlowLayoutPanel bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 8, 0, 0), Margin = new Padding(0) };
+            FlowLayoutPanel bar = new FluentFlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Padding = new Padding(0, 8, 0, 0), Margin = new Padding(0) };
             bar.Controls.Add(Button(L.T("＋按键点按"), delegate { Add(grid, L.T("按键点按")); }, 106));
             bar.Controls.Add(Button(L.T("＋坐标点击"), delegate { Add(grid, L.T("点击坐标")); }, 106));
             bar.Controls.Add(Button(L.T("＋移动坐标"), delegate { Add(grid, L.T("移动坐标")); }, 106));

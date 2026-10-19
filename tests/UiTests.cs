@@ -20,6 +20,10 @@ internal static class UiTests
     private static extern int CloseThemeData(IntPtr theme);
     [DllImport("uxtheme.dll")]
     private static extern int DrawThemeBackground(IntPtr theme, IntPtr dc, int part, int state, ref NativeRect bounds, IntPtr clip);
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wp, IntPtr lp);
+    [DllImport("user32.dll")]
+    private static extern bool GetUpdateRect(IntPtr window, IntPtr rect, bool erase);
     private static int checks;
     private static void Check(bool value, string message)
     { if (!value) throw new Exception("FAIL: " + message); checks++; }
@@ -154,6 +158,52 @@ internal static class UiTests
             grid.FirstDisplayedScrollingRowIndex = 8;
             Check(grid.FirstDisplayedScrollingRowIndex == 8, "themed scrollbar preserves native grid scrolling");
             grid.FirstDisplayedScrollingRowIndex = 0;
+        }
+    }
+
+    private static void CheckRestorePainting(MainForm main, DataGridView grid)
+    {
+        Label cursor = Field<Label>(main, "cursor"); int changes = 0;
+        cursor.TextChanged += delegate { changes++; };
+        Rectangle desktop = new Rectangle(-1920, 0, 3840, 1080);
+        Call(main, "UpdateCursor", -20, 100, desktop);
+        Call(main, "UpdateCursor", -20, 100, desktop);
+        Check(changes == 1, "unchanged cursor coordinates do not update the label");
+        Call(main, "UpdateCursor", -20, 100, new Rectangle(-1920, 0, 4480, 1440));
+        Check(changes == 2, "desktop changes update the label even when the cursor is stationary");
+        foreach (bool dark in new bool[] { true, false })
+        {
+            main.PreviewTheme(dark);
+            grid.CurrentCell = grid.Rows[0].Cells["key"]; grid.BeginEdit(true);
+            ComboBox editor = (ComboBox)grid.EditingControl;
+            editor.SelectedItem = "X"; grid.CommitEdit(DataGridViewDataErrorContexts.Commit); grid.EndEdit();
+            Call(main, "SetRunning", true); main.WindowState = FormWindowState.Minimized;
+            Application.DoEvents();
+            main.WindowState = FormWindowState.Normal; Call(main, "SetRunning", false);
+            Application.DoEvents();
+            Check(Convert.ToString(grid.Rows[0].Cells["key"].Value) == "X", "key selection survives running and window restoration");
+            ComboBox combo = Field<ComboBox>(main, "language");
+            using (Bitmap bitmap = new Bitmap(combo.Width, combo.Height))
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(Color.Magenta);
+                IntPtr dc = g.GetHdc();
+                try { SendMessage(combo.Handle, 0x14, dc, IntPtr.Zero); }
+                finally { g.ReleaseHdc(dc); }
+                Check(bitmap.GetPixel(combo.Width / 2, combo.Height / 2).ToArgb() == Color.Magenta.ToArgb(),
+                    "combo erase never exposes an intermediate native background");
+            }
+            combo.Invalidate(); combo.Update();
+            Check(!GetUpdateRect(combo.Handle, IntPtr.Zero, false), "combo paint validates the update region after restore");
+            CheckPixel(combo, new Point(combo.Width / 2, 4), main.Palette.Surface, "restored combo face retains its theme");
+            Button button = Field<Button>(main, "start");
+            for (int i = 0; i < 4; i++)
+            {
+                Call(button, "OnMouseEnter", EventArgs.Empty); button.Update();
+                Call(button, "OnMouseLeave", EventArgs.Empty); button.Update();
+            }
+            CheckPixel(button, new Point(button.Width - 1, 0), main.Palette.Background,
+                "repeated restored-button hover leaves no stale corner pixels");
         }
     }
 
@@ -381,6 +431,7 @@ internal static class UiTests
             Check(Field<ComboBox>(main, "language").SelectedIndex == (L.Language == "en" ? 1 : 0), "language picker reflects the current UI language");
             DataGridView grid = Field<DataGridView>(main, "grid");
             CheckThemes(main, grid);
+            CheckRestorePainting(main, grid);
             Check(grid.Rows.Count == 15 && Field<KeyboardWorker>(main, "worker") == null, "main-window preview has 15 rows without installing an input hook");
             Check(Field<Button>(main, "start").Enabled && Field<Label>(main, "status").Text == L.T("已暂停。先配置按键和坐标，再切到目标应用按 F8。"), "redesigned main view starts paused with configuration available");
             Profile p = new Profile { Name = "我的工作配置" };
