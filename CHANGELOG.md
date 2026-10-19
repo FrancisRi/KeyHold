@@ -1,5 +1,19 @@
 # 更新记录
 
+## 0.2.0 — 2026-10-19
+
+- 新增 English / 简体中文切换，首次按系统语言选择，之后记住手动选择。
+- 翻译主界面、每键个性化设置、托盘、运行提示、取点和配置校验错误。
+- 切换语言先暂停，处理未保存的配置后重新打开窗口，保持默认暂停。
+- 英文使用 Segoe UI，按文字宽度调整按钮；保留用户配置名称、备注及 JSON 动作标识。
+- 新增英文 README、语言偏好与跨语言配置测试，完整界面测试在两种语言下执行。
+- 修复本机用户目录拒绝替换语言文件、导致第二次切换报“对路径的访问被拒绝”的问题；偏好文件采用直接写入。
+- 修复语言下拉框底边被顶部自动布局裁切的问题，补充两种语言、最小窗口及放大字号的完整边界检查。
+
+验证：246 项核心/序列、20 项后台线程、512 项界面检查通过（共 778 项）；目标应用真实输入等手动验证边界不变。
+
+English: Added English UI with a persistent language selector, localized status and validation messages, English documentation, and bilingual layout/profile regression coverage.
+
 ## 0.1.0 — 2026-10-19
 
 首次公开源码版本，采用 MIT License。

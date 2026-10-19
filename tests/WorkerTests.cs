@@ -227,6 +227,31 @@ internal static class WorkerTests
             Check(true, "focus is checked again before a delayed continuation");
             Key(worker, 65, false); Native.Foreground = new IntPtr(123);
         }
+        L.Language = "en";
+        try
+        {
+            using (KeyboardWorker english = new KeyboardWorker())
+            {
+                WorkerEvent pending = RequestStart(english);
+                english.Start(profile, pending.Window, pending.StartVersion); Sync(english, delegate { });
+                WorkerEvent e; string running = null;
+                while (english.Events.TryDequeue(out e)) if (e.Kind == "running") running = e.Text;
+                Check(running == "Running: Test target", "English worker reports the target without translating its title");
+                Key(english, 0x77, true); Key(english, 0x77, false);
+                string stopped = null;
+                while (english.Events.TryDequeue(out e)) if (e.Kind == "stopped") stopped = e.Text;
+                Check(stopped == "Paused (F8).", "F8 pause is localized on the worker thread");
+                Key(english, 0x75, true); Key(english, 0x75, false);
+                bool captured = false;
+                while (english.Events.TryDequeue(out e))
+                { if (e.Kind == "point") captured = e.X == 10 && e.Y == 20; if (e.Kind == "stopped") stopped = e.Text; }
+                Check(captured && stopped == "Point captured; macros remain paused. Press F8 to start.", "English F6 event preserves coordinates and paused state");
+                Key(english, 0x7B, true); Key(english, 0x7B, false);
+                while (english.Events.TryDequeue(out e)) if (e.Kind == "stopped") stopped = e.Text;
+                Check(stopped == "Emergency stop: mouse released (F12).", "English emergency status keeps the F12 cancellation marker");
+            }
+        }
+        finally { L.Language = "zh-CN"; }
         Console.WriteLine("PASS: " + checks + " worker checks (fake native input).");
     }
 }

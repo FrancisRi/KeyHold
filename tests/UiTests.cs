@@ -53,6 +53,53 @@ internal static class UiTests
             CheckHeadings(child);
         }
     }
+    private static void CheckCommands(Control root)
+    {
+        foreach (Control child in root.Controls)
+        {
+            if (!child.Visible) continue;
+            if (child is FluentButton)
+            {
+                Check(child.Width >= TextRenderer.MeasureText(child.Text, child.Font).Width,
+                    "command text fits in " + L.Language + ": " + child.Text);
+                Check(child.Right <= child.Parent.ClientSize.Width && child.Bottom <= child.Parent.ClientSize.Height,
+                    "command stays inside its toolbar: " + child.Text);
+            }
+            CheckCommands(child);
+        }
+    }
+    private static void CheckMinimumCommands(Form form)
+    {
+        CheckCommands(form);
+        MainForm main = form as MainForm;
+        if (main != null) CheckLanguageBounds(main);
+        Size size = form.Size; form.Size = form.MinimumSize; Application.DoEvents();
+        CheckCommands(form);
+        if (main != null) CheckLanguageBounds(main);
+        form.Size = size; Application.DoEvents();
+    }
+    private static void CheckLanguageBounds(MainForm form)
+    {
+        ComboBox picker = Field<ComboBox>(form, "language");
+        Font original = picker.Font;
+        using (Font larger = new Font(original.FontFamily, original.Size * 1.25F, original.Style))
+        {
+            foreach (Font font in new Font[] { original, larger })
+            {
+                picker.Font = font; form.PerformLayout(); Application.DoEvents();
+                Rectangle bounds = picker.RectangleToScreen(picker.ClientRectangle);
+                bool fits = true; string clipped = "";
+                for (Control parent = picker.Parent; parent != null; parent = parent.Parent)
+                {
+                    bool contains = parent.RectangleToScreen(parent.ClientRectangle).Contains(bounds);
+                    fits &= contains;
+                    if (!contains) clipped += parent.GetType().Name + " " + parent.ClientRectangle + " / picker " + parent.RectangleToClient(bounds) + "; ";
+                }
+                Check(fits, "language picker fits all ancestor bounds at font " + font.Size + ": " + clipped);
+            }
+        }
+        picker.Font = original; form.PerformLayout(); Application.DoEvents();
+    }
 
     private static void ShowPreview(Form form)
     {
@@ -176,9 +223,44 @@ internal static class UiTests
         try
         {
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-            Run(args); Console.WriteLine("PASS: " + checks + " editor checks (no input injection)."); return 0;
+            L.Language = "zh-CN"; Run(args);
+            L.Language = "en"; Run(args.Length > 0 ? new string[] { System.IO.Path.ChangeExtension(args[0], ".english.png") } : args);
+            TestWindowReplacement();
+            L.Language = "zh-CN"; Console.WriteLine("PASS: " + checks + " editor checks (no input injection)."); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex.GetBaseException().Message); return 1; }
+    }
+    private static void TestWindowReplacement()
+    {
+        string original = L.Language;
+        int opened = 0; bool timeout = false;
+        using (KeyHoldContext context = new KeyHoldContext(delegate
+        {
+            MainForm form = new MainForm(true);
+            form.ShowInTaskbar = false; form.StartPosition = FormStartPosition.Manual; form.Location = new Point(-3000, -3000);
+            form.Shown += delegate
+            {
+                int ordinal = ++opened;
+                Check(Field<KeyboardWorker>(form, "worker") == null && Field<Label>(form, "runState").Text == L.T("●  已暂停"),
+                    "replacement window starts paused without input hooks in preview");
+                form.BeginInvoke((MethodInvoker)delegate
+                {
+                    if (ordinal < 3)
+                    {
+                        Field<ComboBox>(form, "language").SelectedIndex = L.Language == "en" ? 0 : 1;
+                        form.BeginInvoke((MethodInvoker)delegate { form.Close(); });
+                    }
+                    else form.Close();
+                });
+            };
+            return form;
+        }))
+        using (Timer watchdog = new Timer { Interval = 5000 })
+        {
+            watchdog.Tick += delegate { timeout = true; context.ExitThread(); };
+            watchdog.Start(); Application.Run(context); watchdog.Stop();
+        }
+        Check(!timeout && opened == 3 && L.Language == original, "one application context replaces both languages and exits normally");
     }
     private static void Run(string[] args)
     {
@@ -187,30 +269,30 @@ internal static class UiTests
         Action<int, int> point = null;
         using (MacroEditor dialog = new MacroEditor(source, delegate(Action<int, int> receive) { point = receive; }, delegate { point = null; }))
         {
-            ShowPreview(dialog); CheckHeadings(dialog); CheckNumberThemes(dialog);
+            ShowPreview(dialog); CheckHeadings(dialog); CheckNumberThemes(dialog); CheckMinimumCommands(dialog);
             DataGridView before = Field<DataGridView>(dialog, "before"), after = Field<DataGridView>(dialog, "after");
             ComboBox mode = Field<ComboBox>(dialog, "mode");
             Check(before.Rows.Count == 1 && after.Rows.Count == 0 && mode.SelectedIndex == 0, "editor loads per-key actions and hold mode");
             Check(Field<NumericUpDown>(dialog, "mainDuration").Enabled, "hold mode allows setting the deferred short-tap click duration");
-            Check(Field<Label>(dialog, "durationCaption").Text == "短按点击时长 ms", "hold mode names the duration for deferred short taps");
+            Check(Field<Label>(dialog, "durationCaption").Text == L.T("短按点击时长 ms"), "hold mode names the duration for deferred short taps");
             Field<NumericUpDown>(dialog, "mainDuration").Value = 25;
             before.Rows[0].Cells["duration"].Value = 12; before.Rows[0].Cells["gap"].Value = 10;
             Check(source.BeforeActions[0].DurationMs == 40 && source.BeforeActions[0].DelayAfterMs == 40, "unsaved dialog edits do not mutate profile data");
             mode.SelectedIndex = 1;
             Check(Field<NumericUpDown>(dialog, "mainDuration").Enabled, "click mode enables main click duration");
-            Check(Field<Label>(dialog, "durationCaption").Text == "点击时长 ms", "click mode names its ordinary click duration");
-            Call(dialog, "Add", after, "点击坐标");
+            Check(Field<Label>(dialog, "durationCaption").Text == L.T("点击时长 ms"), "click mode names its ordinary click duration");
+            Call(dialog, "Add", after, L.T("点击坐标"));
             Check(String.IsNullOrEmpty(Convert.ToString(after.Rows[0].Cells["key"].Value)) && after.Rows[0].Cells["key"].ReadOnly,
                 "new coordinate click does not display a keyboard binding");
-            after.Rows[0].Cells["kind"].Value = "按键点按";
+            after.Rows[0].Cells["kind"].Value = L.T("按键点按");
             after.Rows[0].Cells["key"].Value = "Q";
-            after.Rows[0].Cells["kind"].Value = "点击坐标";
+            after.Rows[0].Cells["kind"].Value = L.T("点击坐标");
             Check(Convert.ToString(after.Rows[0].Cells["key"].Value) == "" &&
                 ((DataGridViewComboBoxCell)after.Rows[0].Cells["key"]).DisplayStyle == DataGridViewComboBoxDisplayStyle.Nothing,
                 "changing a keyboard action to a click removes its key text and dropdown");
-            after.Rows[0].Cells["kind"].Value = "按键点按";
+            after.Rows[0].Cells["kind"].Value = L.T("按键点按");
             Check(Convert.ToString(after.Rows[0].Cells["key"].Value) == "Q", "changing back to a keyboard action restores its previous key");
-            after.Rows[0].Cells["kind"].Value = "点击坐标";
+            after.Rows[0].Cells["kind"].Value = L.T("点击坐标");
             after.CurrentCell = after.Rows[0].Cells["kind"];
             Call(dialog, "PrepareCapture", after);
             Check(point != null, "coordinate action can request non-focusing F6 capture");
@@ -226,11 +308,11 @@ internal static class UiTests
             keyArgs[1] = Keys.Control | Keys.Shift | Keys.Tab;
             typeof(FluentTabs).GetMethod("ProcessCmdKey", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(tabs, keyArgs);
             Check(tabs.SelectedIndex == 1, "Fluent action navigation supports reverse keyboard switching");
-            Call(dialog, "Add", after, "移动坐标");
+            Call(dialog, "Add", after, L.T("移动坐标"));
             Check(Convert.ToString(after.Rows[1].Cells["key"].Value) == "" && after.Rows[1].Cells["key"].ReadOnly, "move action also has no displayed keyboard binding");
             after.Rows[1].Cells["x"].Value = 321; after.Rows[1].Cells["y"].Value = 123;
             Call(dialog, "Swap", after, -1);
-            Check(Convert.ToString(after.Rows[0].Cells["kind"].Value) == "移动坐标", "action reorder preserves selected action values");
+            Check(Convert.ToString(after.Rows[0].Cells["kind"].Value) == L.T("移动坐标"), "action reorder preserves selected action values");
             Check(point == null, "reorder cancels stale coordinate receiver");
             if (args.Length > 0)
             {
@@ -259,11 +341,11 @@ internal static class UiTests
             mode.SelectedIndex = 1;
             Check(duration.Enabled, "single-click duration is editable without prefix actions");
             mode.SelectedIndex = 0;
-            Call(plain, "Add", before, "移动坐标");
+            Call(plain, "Add", before, L.T("移动坐标"));
             Check(duration.Enabled, "delayed prefix move enables short-tap click duration");
             before.Rows[0].Cells["gap"].Value = 0;
             Check(!duration.Enabled, "instantaneous prefix move does not enable an irrelevant duration");
-            Call(plain, "Add", before, "按键点按");
+            Call(plain, "Add", before, L.T("按键点按"));
             Check(duration.Enabled, "prefix key tap enables short-tap duration immediately");
             before.Rows.RemoveAt(1);
             Check(!duration.Enabled, "removing the last deferred prefix disables the unused duration");
@@ -280,14 +362,14 @@ internal static class UiTests
         {
             DataGridView before = Field<DataGridView>(cancel, "before");
             before.Rows[0].Cells["key"].Value = "Q";
-            Call(cancel, "Add", before, "点击坐标");
+            Call(cancel, "Add", before, L.T("点击坐标"));
             Call(cancel, "Swap", before, -1);
             Check(Convert.ToString(before.Rows[0].Cells["key"].Value) == "" && Convert.ToString(before.Rows[1].Cells["key"].Value) == "Q",
                 "reordering mixed actions preserves the actual keyboard binding and hides coordinate key text");
             Call(cancel, "Swap", before, 1);
             Check(Convert.ToString(before.Rows[0].Cells["key"].Value) == "Q" && Convert.ToString(before.Rows[1].Cells["key"].Value) == "",
                 "reordering mixed actions back does not leak cached keyboard text into coordinate rows");
-            Call(cancel, "Add", Field<DataGridView>(cancel, "before"), "按键点按");
+            Call(cancel, "Add", Field<DataGridView>(cancel, "before"), L.T("按键点按"));
             cancel.Close();
             Check(cancel.Result == null && source.BeforeActions.Count == 1, "cancel leaves existing personalization untouched");
         }
@@ -295,10 +377,12 @@ internal static class UiTests
         {
             ShowPreview(main);
             CheckHeadings(main);
+            CheckMinimumCommands(main);
+            Check(Field<ComboBox>(main, "language").SelectedIndex == (L.Language == "en" ? 1 : 0), "language picker reflects the current UI language");
             DataGridView grid = Field<DataGridView>(main, "grid");
             CheckThemes(main, grid);
             Check(grid.Rows.Count == 15 && Field<KeyboardWorker>(main, "worker") == null, "main-window preview has 15 rows without installing an input hook");
-            Check(Field<Button>(main, "start").Enabled && Field<Label>(main, "status").Text.StartsWith("已暂停"), "redesigned main view starts paused with configuration available");
+            Check(Field<Button>(main, "start").Enabled && Field<Label>(main, "status").Text == L.T("已暂停。先配置按键和坐标，再切到目标应用按 F8。"), "redesigned main view starts paused with configuration available");
             Profile p = new Profile { Name = "我的工作配置" };
             Macro first = new Macro { Key = "X", X = 800, Y = 600, Label = "先点按 1，再执行原坐标" };
             first.BeforeActions.Add(new MacroAction { Key = "1", DelayAfterMs = 10 }); p.Macros.Add(first);
@@ -311,9 +395,16 @@ internal static class UiTests
             main.PreviewTheme(true);
             Check(!Field<Button>(main, "start").IsDisposed && !Field<bool>(main, "dirty"), "theme changes do not alter configuration or dirty state");
             Call(main, "SetRunning", true);
-            Check(!Field<TableLayoutPanel>(main, "settings").Enabled && !Field<Button>(main, "start").Enabled && Field<Label>(main, "runState").Text.Contains("运行中"), "running state disables configuration while exposing its status");
+            Check(!Field<TableLayoutPanel>(main, "settings").Enabled && !Field<Button>(main, "start").Enabled && Field<Label>(main, "runState").Text == L.T("●  运行中"), "running state disables configuration while exposing its status");
             Call(main, "SetRunning", false);
             Check(Field<TableLayoutPanel>(main, "settings").Enabled && Field<Button>(main, "start").Enabled, "pause restores configuration in the new main layout");
+            ComboBox language = Field<ComboBox>(main, "language");
+            language.SelectedIndex = L.Language == "en" ? 0 : 1;
+            Check(main.NextLanguage == null, "language selection returns before requesting window replacement");
+            Application.DoEvents();
+            Check(main.NextLanguage == (L.Language == "en" ? "zh-CN" : "en") && !main.IsDisposed,
+                "language request is deferred to the UI queue; preview performs no IO or worker work");
+            language.SelectedIndex = L.Language == "en" ? 1 : 0; Application.DoEvents();
             if (args.Length > 0)
             {
                 main.PreviewTheme(false); Render(main, System.IO.Path.ChangeExtension(args[0], ".main.png"));

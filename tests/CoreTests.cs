@@ -37,8 +37,59 @@ internal static class CoreTests
         try { Run(); return 0; }
         catch (Exception ex) { Console.WriteLine(ex.Message); return 1; }
     }
+    private static void TestLanguages()
+    {
+        Check(L.ResolveLanguage("zh-TW", null) == "zh-CN", "Chinese OS cultures default to Chinese");
+        Check(L.ResolveLanguage("en-US", null) == "en" && L.ResolveLanguage("de-DE", null) == "en", "other OS cultures default to English");
+        Check(L.ResolveLanguage("zh-CN", "en") == "en" && L.ResolveLanguage("en-US", "zh-CN") == "zh-CN", "saved language overrides OS culture");
+        Check(L.ResolveLanguage("zh-CN", "invalid") == "zh-CN", "invalid preference falls back to OS culture");
+        string folder = Path.Combine(Path.GetTempPath(), "KeyHold-language-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, "language.txt");
+        try
+        {
+            L.Initialize(path, "en-US");
+            Check(L.Language == "en" && new Profile().Name == "Default profile", "missing preference uses OS language and localized new-profile name");
+            L.SavePreference(path, "zh-CN");
+            Check(L.Language == "en", "saving language does not change a live worker's language");
+            L.Initialize(path, "en-US");
+            Check(L.Language == "zh-CN", "preference survives reopening");
+            L.SavePreference(path, "en"); L.Initialize(path, "zh-CN");
+            Check(L.Language == "en", "existing preference can be replaced repeatedly");
+            File.SetAttributes(path, FileAttributes.ReadOnly);
+            try
+            {
+                Throws(delegate { L.SavePreference(path, "zh-CN"); }, "unwritable preferences report failure instead of pretending to save");
+                Check(File.ReadAllText(path) == "en" && L.Language == "en", "failed preference save preserves language and file contents");
+            }
+            finally { File.SetAttributes(path, FileAttributes.Normal); }
+            File.WriteAllText(path, "corrupt"); L.Initialize(path, "zh-CN");
+            Check(L.Language == "zh-CN", "damaged language preference does not prevent startup");
+            Throws(delegate { L.SavePreference(path, "unsupported"); }, "unsupported preference is rejected before changing file");
+            L.Language = "en";
+            string error = null;
+            try { new MacroAction { DurationMs = 0 }.Validate(); } catch (ArgumentException ex) { error = ex.Message; }
+            Check(error != null && error.StartsWith("Duration must be"), "core validation errors are English");
+            Check(L.F("第 {0} 行已取点：({1}, {2})", 3, -400, 900) == "Row 3 captured: (-400, 900)", "translated placeholders preserve negative coordinates and row numbers");
+            Profile p = MakeProfile(true); p.Macros[0].BeforeActions.Add(new MacroAction { Kind = "KeyTap", Key = "1" });
+            p.Macros[0].AfterActions.Add(new MacroAction { Kind = "Move", X = -100, Y = 200 });
+            string json = ProfileStore.Serialize(p);
+            string profilePath = Path.Combine(folder, "profile.json"); File.WriteAllText(profilePath, json);
+            L.Language = "zh-CN"; Profile loaded = ProfileStore.Read(profilePath);
+            Check(loaded.Name == "测试配置" && loaded.Macros[0].Label == "第一个", "changing UI language preserves user names and notes");
+            Check(loaded.Macros[0].MouseMode == "Hold" && loaded.Macros[0].BeforeActions[0].Kind == "KeyTap" && loaded.Macros[0].AfterActions[0].Kind == "Move", "localized profiles retain stable action identifiers");
+            Check(ProfileStore.Serialize(loaded) == json, "profiles round-trip identically between languages");
+        }
+        finally
+        {
+            L.Language = "zh-CN";
+            foreach (string file in Directory.GetFiles(folder)) File.Delete(file);
+            Directory.Delete(folder);
+        }
+    }
     private static void Run()
     {
+        TestLanguages();
         FakeMouse m = new FakeMouse(); MacroEngine e = new MacroEngine(m);
         e.Configure(MakeProfile(true)); e.Start();
         Check(e.KeyEvent(65, true), "down is intercepted");

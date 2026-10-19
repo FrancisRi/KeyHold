@@ -8,7 +8,7 @@ if not exist "%MACRO_CSC%" (
   pause
   exit /b 1
 )
-"%MACRO_CSC%" /nologo /utf8output /codepage:65001 /target:winexe /platform:anycpu /optimize+ /win32manifest:app.manifest /win32icon:assets\KeyHold.ico /resource:assets\KeyHold.ico,KeyHold.AppIcon /out:KeyHold.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll src\Core.cs src\FluentUi.cs src\Native.cs src\KeyboardWorker.cs src\MacroEditor.cs src\Program.cs
+"%MACRO_CSC%" /nologo /utf8output /codepage:65001 /target:winexe /platform:anycpu /optimize+ /win32manifest:app.manifest /win32icon:assets\KeyHold.ico /resource:assets\KeyHold.ico,KeyHold.AppIcon /out:KeyHold.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll src\Localization.cs src\Core.cs src\FluentUi.cs src\Native.cs src\KeyboardWorker.cs src\MacroEditor.cs src\Program.cs
 if errorlevel 1 (
   echo Build failed. Close the running program before rebuilding.
   pause

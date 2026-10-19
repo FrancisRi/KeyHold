@@ -40,8 +40,8 @@ namespace KeyHoldMacro
             hookProc = Hook;
             thread = new Thread(Run); thread.IsBackground = true;
             thread.Name = "KeyHold keyboard"; thread.Start();
-            if (!ready.WaitOne(5000)) throw new InvalidOperationException("键盘监听线程启动超时。");
-            if (startupError != null) throw new InvalidOperationException("无法安装全局键盘钩子。", startupError);
+            if (!ready.WaitOne(5000)) throw new InvalidOperationException(L.T("键盘监听线程启动超时。"));
+            if (startupError != null) throw new InvalidOperationException(L.T("无法安装全局键盘钩子。"), startupError);
         }
         private void Push(string kind, string text) { Events.Enqueue(new WorkerEvent(kind, text)); }
         private void Post(Action action)
@@ -49,7 +49,7 @@ namespace KeyHoldMacro
             if (quitting) return;
             commands.Enqueue(action);
             if (!Native.PostThreadMessage(threadId, Native.WM_COMMAND, UIntPtr.Zero, IntPtr.Zero))
-                throw new InvalidOperationException("后台监听线程已停止，请重新启动程序。");
+                throw new InvalidOperationException(L.T("后台监听线程已停止，请重新启动程序。"));
         }
         // Tickets cross the UI/worker queues. A stop invalidates even requests
         // that the UI has not yet returned to this thread.
@@ -66,7 +66,7 @@ namespace KeyHoldMacro
                 if (!CurrentStart(version)) return;
                 captureKey = false; engine.Configure(copy);
                 if (foreground == IntPtr.Zero || Native.OwnWindow(foreground) || Native.GetForegroundWindow() != foreground)
-                    throw new InvalidOperationException("请先切换到目标应用，再按 F8 启用。");
+                    throw new InvalidOperationException(L.T("请先切换到目标应用，再按 F8 启用。"));
                 foreach (Macro m in copy.Macros)
                     if (m.Enabled)
                     {
@@ -82,7 +82,7 @@ namespace KeyHoldMacro
                 pauseOnFocusLoss = copy.PauseOnFocusLoss;
                 if (!CurrentStart(version)) return;
                 target = foreground; engine.Start();
-                Push("running", "运行中：" + Native.WindowTitle(target));
+                Push("running", L.T("运行中：") + Native.WindowTitle(target));
             });
         }
         public void Stop(string reason)
@@ -93,7 +93,7 @@ namespace KeyHoldMacro
         public void CaptureKey()
         {
             CancelPendingStart();
-            Post(delegate { engine.Stop(); captureKey = true; Push("stopped", "请按要绑定的单键；F12 取消录入。"); });
+            Post(delegate { engine.Stop(); captureKey = true; Push("stopped", L.T("请按要绑定的单键；F12 取消录入。")); });
         }
         private void Fail(Exception ex)
         {
@@ -112,7 +112,7 @@ namespace KeyHoldMacro
             if (!engine.Enabled) return;
             IntPtr fg = Native.GetForegroundWindow();
             if (fg == IntPtr.Zero || Native.OwnWindow(fg) || (pauseOnFocusLoss && fg != target))
-            { CancelPendingStart(); engine.Stop(); Push("stopped", "已暂停：前台窗口发生变化。回到目标应用后按 F8。"); }
+            { CancelPendingStart(); engine.Stop(); Push("stopped", L.T("已暂停：前台窗口发生变化。回到目标应用后按 F8。")); }
         }
         private void Run()
         {
@@ -176,7 +176,7 @@ namespace KeyHoldMacro
             }
             catch (Exception ex)
             {
-                startupError = ex; Push("error", "后台线程停止：" + ex.Message);
+                startupError = ex; Push("error", L.T("后台线程停止：") + ex.Message);
             }
             finally
             {
@@ -214,11 +214,11 @@ namespace KeyHoldMacro
                     if (first)
                     {
                         if (vk == 0x7B)
-                        { CancelPendingStart(); captureKey = false; engine.Stop(); Push("stopped", "已紧急停止并释放鼠标（F12）。"); }
+                        { CancelPendingStart(); captureKey = false; engine.Stop(); Push("stopped", L.T("已紧急停止并释放鼠标（F12）。")); }
                         else if (vk == 0x77)
                         {
                             captureKey = false;
-                            if (engine.Enabled) { CancelPendingStart(); engine.Stop(); Push("stopped", "已暂停（F8）。"); }
+                            if (engine.Enabled) { CancelPendingStart(); engine.Stop(); Push("stopped", L.T("已暂停（F8）。")); }
                             else
                             {
                                 WorkerEvent e = new WorkerEvent("start", "");
@@ -230,9 +230,9 @@ namespace KeyHoldMacro
                         {
                             CancelPendingStart(); captureKey = false; engine.Stop();
                             Native.POINT p;
-                            if (!Native.GetCursorPos(out p)) throw new InvalidOperationException("无法读取当前鼠标坐标。");
+                            if (!Native.GetCursorPos(out p)) throw new InvalidOperationException(L.T("无法读取当前鼠标坐标。"));
                             WorkerEvent e = new WorkerEvent("point", ""); e.X = p.x; e.Y = p.y; Events.Enqueue(e);
-                            Push("stopped", "已取点；宏保持暂停。按 F8 启用。");
+                            Push("stopped", L.T("已取点；宏保持暂停。按 F8 启用。"));
                         }
                     }
                 }

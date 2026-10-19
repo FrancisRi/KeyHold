@@ -494,7 +494,7 @@ namespace KeyHoldMacro
                 if (value < 0 || value >= pages.Count || value == selectedIndex) return;
                 selectedIndex = value;
                 for (int i = 0; i < pages.Count; i++)
-                { pages[i].Visible = i == value; buttons[i].Tone = i == value ? FluentButtonTone.Selected : FluentButtonTone.Subtle; buttons[i].AccessibleDescription = i == value ? "已选择" : "未选择"; buttons[i].Invalidate(); }
+                { pages[i].Visible = i == value; buttons[i].Tone = i == value ? FluentButtonTone.Selected : FluentButtonTone.Subtle; buttons[i].AccessibleDescription = i == value ? L.T("已选择") : L.T("未选择"); buttons[i].Invalidate(); }
                 if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty);
             }
         }
@@ -509,7 +509,7 @@ namespace KeyHoldMacro
     internal static class FluentUi
     {
         private static readonly FluentPalette fallback = new FluentPalette(false, false);
-        public static Font Font(float size, FontStyle style) { return new Font("Microsoft YaHei UI", size, style); }
+        public static Font Font(float size, FontStyle style) { return new Font(L.Language == "en" ? "Segoe UI" : "Microsoft YaHei UI", size, style); }
         public static Label Text(string value, float size, bool muted)
         { return new Label { Text = value, AutoSize = true, Font = Font(size, FontStyle.Regular), Tag = muted ? "muted" : null, BackColor = Color.Transparent, Margin = new Padding(0) }; }
         public static FluentPalette PaletteFor(Control control)

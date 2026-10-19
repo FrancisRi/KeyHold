@@ -85,7 +85,7 @@ namespace KeyHoldMacro
             input.u.ki.flags = (up ? 0x0002u : 0u) | (extended ? 0x0001u : 0u);
             input.u.ki.extra = new UIntPtr(0x4B484D31);
             if (Native.SendInput(1, new Native.INPUT[] { input }, Marshal.SizeOf(typeof(Native.INPUT))) != 1)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows 未接受键盘输入，请检查目标程序权限。");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), L.T("Windows 未接受键盘输入，请检查目标程序权限。"));
         }
         public void Press(int vk) { Send(vk, false); }
         public void Release(int vk) { Send(vk, true); }
@@ -102,20 +102,20 @@ namespace KeyHoldMacro
         private static void Send(params Native.INPUT[] inputs)
         {
             if (Native.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Native.INPUT))) != inputs.Length)
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Windows 未完整接受鼠标输入。若目标程序以管理员运行，请以相同权限启动本程序。");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), L.T("Windows 未完整接受鼠标输入。若目标程序以管理员运行，请以相同权限启动本程序。"));
         }
         public static void CheckCoordinates(int x, int y)
         {
             bool inside = false;
             foreach (System.Windows.Forms.Screen s in System.Windows.Forms.Screen.AllScreens)
                 if (s.Bounds.Contains(x, y)) { inside = true; break; }
-            if (!inside) throw new ArgumentException("目标坐标 (" + x + ", " + y + ") 不在当前任何显示器内，请重新取点。");
+            if (!inside) throw new ArgumentException(L.F("目标坐标 ({0}, {1}) 不在当前任何显示器内，请重新取点。", x, y));
         }
         private static Native.INPUT MoveInputAt(int x, int y)
         {
             // Pixel-center mapping avoids rounding to the adjacent physical pixel.
             Rectangle r = Native.Desktop;
-            if (!r.Contains(x, y)) throw new ArgumentException("显示器布局已改变，请重新取点。");
+            if (!r.Contains(x, y)) throw new ArgumentException(L.T("显示器布局已改变，请重新取点。"));
             int nx = Math.Min(65535, (int)(((long)(x - r.Left) * 65536 + 32768) / r.Width));
             int ny = Math.Min(65535, (int)(((long)(y - r.Top) * 65536 + 32768) / r.Height));
             return Mouse(nx, ny, 0x8000 | 0x4000 | 0x0001 | 0x2000);

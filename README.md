@@ -1,5 +1,7 @@
 # KeyHold
 
+简体中文 · [English](README.en.md)
+
 适用于 **Windows 11** 的后台按键与鼠标宏工具。将一个按键映射到屏幕坐标，按住时保持鼠标左键；也可以为每个键编排前置、后置动作及时间间隔。
 
 使用 C#、.NET Framework 4.8 和 WinForms 开发，无第三方运行库依赖。程序启动时始终暂停，不显示游戏内覆盖层。
@@ -13,6 +15,7 @@
 - 动作时长与间隔独立设置，默认 40ms，可按目标应用调整。
 - 可选按键拦截、切换前台窗口自动暂停、全局取点和系统托盘。
 - Windows 原生窗口与 Fluent 风格界面，跟随系统深浅主题。
+- 简体中文 / English 界面，首次按系统语言选择，并记住手动选择。
 
 ![KeyHold 深色主界面](docs/screenshots/main-dark.png)
 
@@ -22,7 +25,7 @@
 
 ## 获取与运行
 
-下载 [KeyHold v0.1.0 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.1.0/KeyHold-v0.1.0-win.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
+下载 [KeyHold v0.2.0 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.2.0/KeyHold-v0.2.0-win.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
 
 系统要求：Windows 11、.NET Framework 4.8。无需安装 Python、AutoHotkey 或 Visual Studio。
 
@@ -31,6 +34,8 @@
 3. 填写配置名称、选择按键，并使用 F6 取点。
 4. 保存配置，切到目标应用后按 F8 启用。
 5. 按住宏键执行；按 F12 可随时紧急停止并释放程序按下的输入。
+
+右上角可选择简体中文或 English。切换时先暂停，提示保存未保存的配置，再重新打开配置窗口；新窗口仍为暂停状态。已有配置名称、备注和 JSON 动作标识保持原样。系统原生文件对话框和消息框按钮的语言由 Windows 决定。
 
 | 快捷键 | 功能 |
 | --- | --- |
@@ -70,9 +75,9 @@ cd KeyHold
 
 默认测试不安装真实键盘钩子、不发送真实鼠标或键盘输入。三组测试应均显示 `PASS`：
 
-- 核心及动作序列：229 项检查。
-- 后台工作线程：16 项检查，使用假的 Windows 接口。
-- WinForms 界面：151 项检查，需要 Windows 桌面环境。
+- 核心及动作序列：246 项检查，含语言选择、偏好保存及跨语言 JSON 兼容。
+- 后台工作线程：20 项检查，使用假的 Windows 接口，含英文状态提示。
+- WinForms 界面：512 项检查，覆盖中英文及最小窗口下的按钮布局，需要 Windows 桌面环境。
 
 `tests/ScrollInteractionTests.cs` 和 `tests/StartupPaintTests.cs` 是可选桌面验证，不包含在默认测试中。前者会移动真实鼠标并仅拖动无宏监听预览里的滚动条；后者只显示预览并捕获启动帧。运行可选验证时应保持测试窗口不受遮挡。
 
