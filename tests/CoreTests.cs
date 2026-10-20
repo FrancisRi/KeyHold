@@ -89,6 +89,7 @@ internal static class CoreTests
     }
     private static void Run()
     {
+        count += FeedbackTests.Run();
         TestLanguages();
         FakeMouse m = new FakeMouse(); MacroEngine e = new MacroEngine(m);
         e.Configure(MakeProfile(true)); e.Start();

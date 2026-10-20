@@ -84,6 +84,12 @@ internal static class UiTests
     }
     private static void CheckLanguageBounds(MainForm form)
     {
+        foreach (string field in new string[] { "suppress", "pauseFocus", "sound" })
+        {
+            CheckBox toggle = Field<CheckBox>(form, field);
+            Check(toggle.Width >= TextRenderer.MeasureText(toggle.Text, toggle.Font).Width + (int)(52 * toggle.DeviceDpi / 96F)
+                && toggle.Parent.ClientRectangle.Contains(toggle.Bounds), "all settings toggle captions fit at minimum size: " + field);
+        }
         ComboBox picker = Field<ComboBox>(form, "language");
         Font original = picker.Font;
         using (Font larger = new Font(original.FontFamily, original.Size * 1.25F, original.Style))
@@ -275,6 +281,7 @@ internal static class UiTests
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
             L.Language = "zh-CN"; Run(args);
             L.Language = "en"; Run(args.Length > 0 ? new string[] { System.IO.Path.ChangeExtension(args[0], ".english.png") } : args);
+            TestSoundControls();
             TestWindowReplacement();
             L.Language = "zh-CN"; Console.WriteLine("PASS: " + checks + " editor checks (no input injection)."); return 0;
         }
@@ -311,6 +318,39 @@ internal static class UiTests
             watchdog.Start(); Application.Run(context); watchdog.Stop();
         }
         Check(!timeout && opened == 3 && L.Language == original, "one application context replaces both languages and exits normally");
+    }
+    private static void TestSoundControls()
+    {
+        foreach (string language in new string[] { "zh-CN", "en" })
+        {
+            L.Language = language;
+            System.Collections.Generic.List<FeedbackCue> cues = new System.Collections.Generic.List<FeedbackCue>();
+            using (MainForm form = new MainForm(true, delegate(FeedbackCue cue) { cues.Add(cue); return true; }))
+            {
+                ShowPreview(form);
+                Check(cues.Count == 0 && Field<CheckBox>(form, "sound").Checked && !Field<bool>(form, "dirty"), "sound defaults on without startup audio or a dirty profile");
+                for (int i = 0; i < 4; i++) Field<Button>(form, "testSound").PerformClick();
+                Check(String.Join(",", cues) == "Enabled,Paused,Emergency,Error", "sound audition cycles distinct cues through a fake output");
+                Check(Field<Label>(form, "runState").Text == L.T("●  已暂停") && !Field<bool>(form, "dirty"), "audition never enables macros or edits profiles");
+                Field<CheckBox>(form, "sound").Checked = false;
+                Call(form, "PlayFeedback", FeedbackCue.Enabled, false);
+                Check(cues.Count == 4 && !Field<bool>(form, "dirty"), "muting suppresses automatic sound without changing profile data");
+                Field<Button>(form, "testSound").PerformClick();
+                Check(cues.Count == 5 && cues[4] == FeedbackCue.Enabled, "explicit audition still works when automatic sounds are muted");
+                Field<CheckBox>(form, "sound").Checked = true;
+                Call(form, "PlayFeedback", FeedbackCue.Paused, false);
+                Check(cues.Count == 6 && cues[5] == FeedbackCue.Paused, "unmuting restores automatic state sounds");
+                Call(form, "SetRunning", true);
+                Check(!Field<Button>(form, "testSound").Enabled && cues.Count == 6, "running UI blocks audition and does not invent worker confirmations");
+            }
+            using (MainForm failure = new MainForm(true, delegate(FeedbackCue cue) { return false; }))
+            {
+                ShowPreview(failure); Call(failure, "SetRunning", true);
+                Call(failure, "PlayFeedback", FeedbackCue.Enabled, false);
+                Check(Field<Label>(failure, "status").Text == L.T("提示音无法播放，请检查 Windows 音量和输出设备。") && !Field<TableLayoutPanel>(failure, "settings").Enabled,
+                    "audio output failure is reported without changing macro running state");
+            }
+        }
     }
     private static void Run(string[] args)
     {

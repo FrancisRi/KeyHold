@@ -56,6 +56,15 @@ namespace KeyHoldMacro
 
         private static readonly Dictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            { "状态提示音", "Sound cues" },
+            { "试听提示音", "Test sound" },
+            { "提示音设置无法保存：", "Could not save sound preferences: " },
+            { "提示音无法播放，请检查 Windows 音量和输出设备。", "Sound could not be played. Check the Windows volume and output device." },
+            { "试听：{0}（不会启用宏）。", "Preview: {0} (macros stay paused)." },
+            { "已启用", "Enabled" },
+            { "暂停", "Paused" },
+            { "紧急停止", "Emergency stop" },
+            { "错误", "Error" },
             { "程序已在运行，请双击托盘图标打开。", "KeyHold is already running. Double-click its tray icon to open settings." },
             { "已请求停止宏。\r\n", "A macro stop has been requested.\r\n" },
             { "程序错误", "Application error" },

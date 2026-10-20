@@ -79,6 +79,12 @@ namespace KeyHoldMacro
         private readonly Label runState = new Label();
         private readonly TableLayoutPanel settings = new FluentTableLayoutPanel();
         private readonly ComboBox language = new FluentComboBox();
+        private readonly CheckBox sound = new FluentToggle();
+        private readonly Button testSound = new FluentButton();
+        private readonly FeedbackAudio audio;
+        private readonly Func<FeedbackCue, bool> soundSink;
+        private bool soundEnabled = true, changingSound;
+        private int previewSoundIndex;
         private readonly bool previewOnly;
         internal string NextLanguage { get; private set; }
         private bool loading, dirty, closing;
@@ -90,9 +96,17 @@ namespace KeyHoldMacro
         private MacroEditor editing;
         private Action<int, int> actionPoint;
         public MainForm() : this(false) { }
-        internal MainForm(bool previewOnly)
+        internal MainForm(bool previewOnly) : this(previewOnly, null) { }
+        internal MainForm(bool previewOnly, Func<FeedbackCue, bool> feedbackSink)
         {
             this.previewOnly = previewOnly;
+            if (previewOnly) soundSink = feedbackSink;
+            else
+            {
+                soundEnabled = FeedbackPreference.Read(FeedbackPreference.PathName);
+                audio = new FeedbackAudio(); soundSink = audio.Play;
+                Disposed += delegate { audio.Dispose(); };
+            }
             Text = "KeyHold";
             ClientSize = new Size(1240, 920); MinimumSize = new Size(1080, 820);
             StartPosition = FormStartPosition.CenterScreen;
@@ -161,8 +175,12 @@ namespace KeyHoldMacro
             // its auto-size measurement can omit two physical border pixels.
             language.Anchor = AnchorStyles.Right; language.Margin = new Padding(0, 8, 0, 8);
             heading.Controls.Add(language, 1, 2);
+            FlowLayoutPanel headerTools = Flow(); headerTools.AutoSize = true;
             Label languageHint = FluentUi.Text(L.T("语言切换后将重新打开配置窗口。"), 9F, true);
-            languageHint.Margin = new Padding(0, 12, 0, 0); heading.Controls.Add(languageHint, 0, 2);
+            languageHint.Margin = new Padding(0, 12, 12, 0); headerTools.Controls.Add(languageHint);
+            testSound.Text = L.T("试听提示音"); testSound.Width = 118; testSound.Height = 36;
+            testSound.Margin = new Padding(0, 4, 0, 4); testSound.Click += delegate { PreviewSound(); };
+            headerTools.Controls.Add(testSound); heading.Controls.Add(headerTools, 0, 2);
             // Native combo selection (including UI Automation) must return
             // before its owning window is disposed and reconstructed.
             language.SelectedIndexChanged += delegate
@@ -245,10 +263,12 @@ namespace KeyHoldMacro
             TableLayoutPanel behavior = new FluentTableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0) };
             behavior.RowStyles.Add(new RowStyle(SizeType.Absolute, 35)); behavior.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             FlowLayoutPanel toggles = Flow(); suppress.Text = L.T("拦截宏按键（不传给目标应用）"); suppress.Width = 340;
-            pauseFocus.Text = L.T("切换前台窗口时自动暂停"); pauseFocus.Width = L.Language == "en" ? 380 : 310;
+            pauseFocus.Text = L.T("切换前台窗口时自动暂停"); pauseFocus.Width = L.Language == "en" ? 340 : 310;
             suppress.Margin = pauseFocus.Margin = new Padding(0, 0, 24, 0);
             suppress.CheckedChanged += Changed; pauseFocus.CheckedChanged += Changed;
-            toggles.Controls.Add(suppress); toggles.Controls.Add(pauseFocus); behavior.Controls.Add(toggles, 0, 0);
+            sound.Text = L.T("状态提示音"); sound.Width = 180; sound.MinimumSize = new Size(180, 32); sound.Margin = new Padding(0);
+            sound.Checked = soundEnabled; sound.CheckedChanged += delegate { ChangeSound(); };
+            toggles.Controls.Add(suppress); toggles.Controls.Add(pauseFocus); toggles.Controls.Add(sound); behavior.Controls.Add(toggles, 0, 0);
             Label behaviorHint = FluentUi.Text(L.T("新键接管只移动、不松左键；短按完成个性化序列。每组最多 15 个宏，坐标为桌面物理像素。"), 9F, true);
             behaviorHint.AutoSize = false; behaviorHint.Dock = DockStyle.Fill;
             behavior.Controls.Add(behaviorHint, 0, 1);
@@ -284,14 +304,14 @@ namespace KeyHoldMacro
         }
         private void ShowSettings()
         {
-            EmergencyStop(); Show(); WindowState = FormWindowState.Normal; Activate();
+            EmergencyStop(false); Show(); WindowState = FormWindowState.Normal; Activate();
         }
         private void ChangeLanguage()
         {
             string requested = language.SelectedIndex == 1 ? "en" : "zh-CN";
             if (requested == L.Language) return;
             if (previewOnly) { NextLanguage = requested; return; }
-            EmergencyStop();
+            EmergencyStop(false);
             if (!DiscardOrSave()) { language.SelectedIndex = L.Language == "en" ? 1 : 0; return; }
             try { L.SavePreference(L.PreferencePath, requested); }
             catch (Exception ex)
@@ -304,7 +324,7 @@ namespace KeyHoldMacro
         }
         private void SetRunning(bool value)
         {
-            settings.Enabled = !value; start.Enabled = !value;
+            settings.Enabled = !value; start.Enabled = !value; testSound.Enabled = !value;
             tray.Text = value ? L.T("KeyHold：运行中（F12 停止）") : L.T("KeyHold：已暂停");
             runState.Text = value ? L.T("●  运行中") : L.T("●  已暂停");
             runState.ForeColor = value ? Palette.Success : Palette.Muted;
@@ -318,8 +338,10 @@ namespace KeyHoldMacro
             if (Visible && WindowState != FormWindowState.Minimized && Native.GetCursorPos(out p))
                 UpdateCursor(p.x, p.y, Native.Desktop);
             WorkerEvent e;
+            FeedbackBatch feedback = new FeedbackBatch();
             while (worker.Events.TryDequeue(out e))
             {
+                feedback.Add(e.Cue, e.StartVersion);
                 if (e.Kind == "start")
                 {
                     CancelCountdown();
@@ -329,7 +351,7 @@ namespace KeyHoldMacro
                 }
                 else if (e.Kind == "running") { SetRunning(true); status.Text = e.Text; }
                 else if (e.Kind == "stopped") { CancelCountdown(); SetRunning(false); status.Text = e.Text; if (e.Text.Contains("F12")) actionPoint = null; }
-                else if (e.Kind == "error") { actionPoint = null; CancelCountdown(); SetRunning(false); Error(e.Text); }
+                else if (e.Kind == "error") { feedback.Clear(); actionPoint = null; CancelCountdown(); SetRunning(false); Error(e.Text); }
                 else if (e.Kind == "point")
                 {
                     if (actionPoint != null)
@@ -351,6 +373,7 @@ namespace KeyHoldMacro
                     status.Text = L.F("第 {0} 行按键已录入。", captureRow + 1);
                 }
             }
+            PlayFeedback(feedback.Take(worker.StartVersion), false);
             if (countdown > 0)
             {
                 int seconds = Math.Max(0, (int)Math.Ceiling((startAt - DateTime.UtcNow).TotalSeconds));
@@ -377,8 +400,36 @@ namespace KeyHoldMacro
         }
         private void CancelCountdown() { countdown = 0; start.Text = L.T("3 秒后启用并最小化"); }
         public void EmergencyStop()
+        { EmergencyStop(true); }
+        private void EmergencyStop(bool confirm)
         {
-            CancelCountdown(); if (worker != null) worker.Stop(L.T("已停止并请求释放鼠标。"));
+            CancelCountdown(); if (worker != null) worker.Stop(L.T("已停止并请求释放鼠标。"), confirm);
+        }
+        private void ChangeSound()
+        {
+            if (changingSound) return;
+            bool requested = sound.Checked;
+            try { if (!previewOnly) FeedbackPreference.Write(FeedbackPreference.PathName, requested); }
+            catch (Exception ex)
+            {
+                changingSound = true; sound.Checked = soundEnabled; changingSound = false;
+                Error(L.T("提示音设置无法保存：") + ex.Message); return;
+            }
+            soundEnabled = requested;
+            if (!requested && audio != null) audio.Stop();
+        }
+        private void PlayFeedback(FeedbackCue cue, bool preview)
+        {
+            if (cue == FeedbackCue.None || (!soundEnabled && !preview) || soundSink == null) return;
+            if (!soundSink(cue)) status.Text = L.T("提示音无法播放，请检查 Windows 音量和输出设备。");
+        }
+        private void PreviewSound()
+        {
+            FeedbackCue[] cues = { FeedbackCue.Enabled, FeedbackCue.Paused, FeedbackCue.Emergency, FeedbackCue.Error };
+            string[] names = { L.T("已启用"), L.T("暂停"), L.T("紧急停止"), L.T("错误") };
+            int index = previewSoundIndex++ % cues.Length;
+            status.Text = L.F("试听：{0}（不会启用宏）。", names[index]);
+            PlayFeedback(cues[index], true);
         }
         private void SessionChanged(object sender, SessionSwitchEventArgs e) { worker.Stop(L.T("会话发生变化，已暂停。")); }
         private void PowerChanged(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Suspend) worker.Stop(L.T("系统休眠，已暂停。")); }
@@ -393,7 +444,7 @@ namespace KeyHoldMacro
         {
             try
             {
-                EmergencyStop(); grid.EndEdit();
+                EmergencyStop(false); grid.EndEdit();
                 DataGridViewRow row = grid.Rows[rowIndex];
                 string key = Convert.ToString(row.Cells["key"].Value); int vk, x, y;
                 if (!KeyCatalog.TryGet(key, out vk)) throw new ArgumentException(L.T("请先为该行选择宏按键。"));
@@ -547,6 +598,7 @@ namespace KeyHoldMacro
         }
         private void Error(string message)
         {
+            PlayFeedback(FeedbackCue.Error, false);
             status.Text = message; status.ForeColor = Palette.Danger;
             tray.ShowBalloonTip(4000, L.T("KeyHold：需要处理"), message, ToolTipIcon.Warning);
             if (Visible && WindowState != FormWindowState.Minimized)
@@ -555,7 +607,7 @@ namespace KeyHoldMacro
         private void OnClosing(object sender, FormClosingEventArgs e)
         {
             if (closing) return;
-            EmergencyStop();
+            EmergencyStop(false);
             if (NextLanguage == null && e.CloseReason == CloseReason.UserClosing && !DiscardOrSave()) { e.Cancel = true; return; }
             closing = true; timer.Stop();
             SystemEvents.SessionSwitch -= SessionChanged; SystemEvents.PowerModeChanged -= PowerChanged;

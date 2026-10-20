@@ -15,6 +15,7 @@ Built with C# 5, .NET Framework 4.8 and WinForms. No third-party runtime depende
 - Optional key interception, automatic pause on foreground-window changes, global point capture and a system tray menu.
 - Native Windows window chrome, Fluent-style controls and system light/dark themes.
 - English and Simplified Chinese UI, including customization, tray menus, status messages and validation errors.
+- Distinct sound cues for enabled, paused, emergency-stop and error states, with a persistent mute option and safe audition.
 
 ![English main window](docs/screenshots/main-en-dark.png)
 
@@ -39,6 +40,8 @@ Requires Windows 11 and .NET Framework 4.8. Extract the complete ZIP, then run `
 | F12 | Emergency stop and release |
 
 These three keys are reserved. Minimize the window to keep KeyHold in the tray; double-click the tray icon to reopen settings and pause macros.
+
+Sound cues are enabled by default: two ascending notes confirm a successful start, two descending notes announce a pause, and distinct three-note cues identify emergency stops and errors. A failed or canceled start never announces success. F6 and ordinary settings operations stay silent when macros are already paused. The **Sound cues** switch remembers your choice across profiles and restarts. **Test sound** cycles through all four cues without enabling macros; this explicit preview also works when automatic sounds are muted. Volume follows KeyHold's application volume in Windows. Verify that the cues are audible through your chosen output device in the target fullscreen application.
 
 Choose **English** or **简体中文** in the upper-right language selector. On first launch, Chinese Windows UI cultures select Simplified Chinese; other cultures select English. Your choice is saved for later launches. Changing language pauses macros, offers to save unsaved changes, then reopens settings in the chosen language, still paused. Profile names and notes are user data and are never translated. Native file-dialog controls and message-box buttons follow the Windows language.
 
@@ -68,11 +71,11 @@ cd KeyHold
 
 The scripts use the .NET Framework C# compiler included with Windows and pause before returning. Visual Studio, Python and AutoHotkey are not required.
 
-The default suites perform **802 checks**: 246 core/sequence, 20 worker and 536 UI checks. They use fake input and install no real keyboard hooks or simulated mouse/keyboard input. UI checks need a Windows desktop and cover both languages, themes and minimum-window command layouts. Language preference tests use temporary files. Existing version 1/2 JSON profiles remain compatible.
+The default suites perform **895 checks**: 291 core/sequence, 32 worker and 572 UI checks. They use fake input and fake audio output, install no real keyboard hooks, and produce no simulated mouse/keyboard input or actual sound. Tests cover confirmed state cues, failed/canceled starts, cue batching, PCM data, preference persistence and both languages. UI checks need a Windows desktop and cover themes and minimum-window layouts. Existing version 1/2 JSON profiles remain compatible.
 
 Optional desktop checks are separate from `Test.cmd`: `ScrollInteractionTests.cs` moves the real cursor only inside its own preview; `StartupPaintTests.cs` displays preview windows and captures startup and restore/hover frames after key selection and a borderless fullscreen cover (not an exclusive display-mode switch). Both use previews without macro listeners.
 
-Profiles remain in `%LOCALAPPDATA%\KeyHoldMacro\Profiles` for compatibility. The language choice is stored separately in `%LOCALAPPDATA%\KeyHoldMacro\language.txt`. The `KeyHoldMacro` source namespace and single-instance mutex are also preserved.
+Profiles remain in `%LOCALAPPDATA%\KeyHoldMacro\Profiles` for compatibility. The language choice is stored separately in `%LOCALAPPDATA%\KeyHoldMacro\language.txt`; automatic sound preferences use `sound-enabled.txt` in the same directory. The `KeyHoldMacro` source namespace and single-instance mutex are also preserved.
 
 ## Limitations and verification
 

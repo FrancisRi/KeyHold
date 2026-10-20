@@ -12,6 +12,7 @@ namespace KeyHoldMacro
         public string Kind, Text;
         public int X, Y, Key;
         public int StartVersion;
+        public FeedbackCue Cue;
         public IntPtr Window;
         public WorkerEvent(string kind, string text) { Kind = kind; Text = text; }
     }
@@ -34,6 +35,7 @@ namespace KeyHoldMacro
         private Exception startupError;
         private int lastActive = -1;
         private int startVersion;
+        private readonly FeedbackTransitions feedback = new FeedbackTransitions();
         public KeyboardWorker()
         {
             engine = new MacroEngine(new WindowsMouse(), new WindowsKeyboard(), delegate { return clock.ElapsedMilliseconds; });
@@ -43,7 +45,14 @@ namespace KeyHoldMacro
             if (!ready.WaitOne(5000)) throw new InvalidOperationException(L.T("键盘监听线程启动超时。"));
             if (startupError != null) throw new InvalidOperationException(L.T("无法安装全局键盘钩子。"), startupError);
         }
-        private void Push(string kind, string text) { Events.Enqueue(new WorkerEvent(kind, text)); }
+        private void Push(string kind, string text) { Push(kind, text, false); }
+        private void Push(string kind, string text, bool confirmStop)
+        { Push(kind, text, confirmStop, StartVersion); }
+        private void Push(string kind, string text, bool confirmStop, int version)
+        {
+            Events.Enqueue(new WorkerEvent(kind, text) { Cue = feedback.Observe(kind, confirmStop), StartVersion = version });
+        }
+        internal int StartVersion { get { return Interlocked.CompareExchange(ref startVersion, 0, 0); } }
         private void Post(Action action)
         {
             if (quitting) return;
@@ -82,13 +91,15 @@ namespace KeyHoldMacro
                 pauseOnFocusLoss = copy.PauseOnFocusLoss;
                 if (!CurrentStart(version)) return;
                 target = foreground; engine.Start();
-                Push("running", L.T("运行中：") + Native.WindowTitle(target));
+                Push("running", L.T("运行中：") + Native.WindowTitle(target), false, version);
             });
         }
         public void Stop(string reason)
+        { Stop(reason, false); }
+        public void Stop(string reason, bool confirmStop)
         {
             CancelPendingStart();
-            Post(delegate { captureKey = false; engine.Stop(); Push("stopped", reason); });
+            Post(delegate { captureKey = false; engine.Stop(); Push("stopped", reason, confirmStop); });
         }
         public void CaptureKey()
         {
@@ -214,7 +225,7 @@ namespace KeyHoldMacro
                     if (first)
                     {
                         if (vk == 0x7B)
-                        { CancelPendingStart(); captureKey = false; engine.Stop(); Push("stopped", L.T("已紧急停止并释放鼠标（F12）。")); }
+                        { CancelPendingStart(); captureKey = false; engine.Stop(); Push("stopped", L.T("已紧急停止并释放鼠标（F12）。"), true); }
                         else if (vk == 0x77)
                         {
                             captureKey = false;

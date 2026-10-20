@@ -252,6 +252,58 @@ internal static class WorkerTests
             }
         }
         finally { L.Language = "zh-CN"; }
+        TestFeedback();
         Console.WriteLine("PASS: " + checks + " worker checks (fake native input).");
+    }
+    private static List<WorkerEvent> Drain(KeyboardWorker worker)
+    {
+        Sync(worker, delegate { });
+        List<WorkerEvent> events = new List<WorkerEvent>(); WorkerEvent e;
+        while (worker.Events.TryDequeue(out e)) events.Add(e);
+        return events;
+    }
+    private static void TestFeedback()
+    {
+        Profile profile = new Profile(); profile.Macros.Add(new Macro { Key = "A", X = 100, Y = 200 });
+        using (KeyboardWorker worker = new KeyboardWorker())
+        {
+            worker.Stop("already paused");
+            Check(Drain(worker).TrueForAll(e => e.Cue == FeedbackCue.None), "ordinary stops during paused startup are silent");
+            WorkerEvent request = RequestStart(worker);
+            Check(request.Cue == FeedbackCue.None, "F8 request carries no premature enable sound");
+            Key(worker, 0x7B, true); Key(worker, 0x7B, false);
+            worker.Start(profile, request.Window, request.StartVersion);
+            List<WorkerEvent> canceled = Drain(worker);
+            Check(!canceled.Exists(e => e.Cue == FeedbackCue.Enabled) && canceled.Exists(e => e.Cue == FeedbackCue.Emergency),
+                "an F8 request canceled by F12 cannot emit an enabled cue later");
+            request = RequestStart(worker);
+            worker.Start(profile, request.Window, request.StartVersion);
+            List<WorkerEvent> events = Drain(worker);
+            WorkerEvent ack = events.Find(e => e.Kind == "running");
+            Check(ack != null && ack.Cue == FeedbackCue.Enabled && ack.StartVersion == request.StartVersion, "worker confirms enabled only after engine start succeeds");
+            worker.Stop("UI pause");
+            Check(ack.StartVersion != worker.StartVersion, "a later stop immediately invalidates an enable acknowledgement not yet consumed by the UI");
+            events = Drain(worker);
+            Check(events.Exists(e => e.Cue == FeedbackCue.Paused), "UI pause reports an actual state transition");
+            Key(worker, 0x75, true); Key(worker, 0x75, false);
+            Check(Drain(worker).TrueForAll(e => e.Cue == FeedbackCue.None), "F6 capture while paused remains silent");
+            Key(worker, 0x7B, true); Key(worker, 0x7B, true); Key(worker, 0x7B, false);
+            Check(Drain(worker).FindAll(e => e.Cue == FeedbackCue.Emergency).Count == 1, "F12 confirms once even while paused and ignores auto-repeat");
+            worker.Stop("UI emergency", true);
+            Check(Drain(worker).Exists(e => e.Cue == FeedbackCue.Emergency), "the tray/button emergency path confirms stopping too");
+            Native.Foreground = IntPtr.Zero;
+            request = RequestStart(worker); worker.Start(profile, request.Window, request.StartVersion);
+            events = Drain(worker);
+            Check(events.Exists(e => e.Cue == FeedbackCue.Error) && !events.Exists(e => e.Cue == FeedbackCue.Enabled), "invalid target produces an error cue and no false enabled cue");
+            Native.Foreground = new IntPtr(123);
+            request = RequestStart(worker); worker.Start(profile, request.Window, request.StartVersion); Drain(worker);
+            Key(worker, 0x77, true); Key(worker, 0x77, true); Key(worker, 0x77, false);
+            Check(Drain(worker).FindAll(e => e.Cue == FeedbackCue.Paused).Count == 1, "F8 pause confirms once and ignores auto-repeat");
+            request = RequestStart(worker); worker.Start(profile, request.Window, request.StartVersion); Drain(worker);
+            Native.Foreground = new IntPtr(456);
+            Native.PostThreadMessage(1, Native.WM_TIMER, UIntPtr.Zero, IntPtr.Zero);
+            Check(Drain(worker).Exists(e => e.Cue == FeedbackCue.Paused), "focus-loss automatic pause has the same confirmed pause sound");
+            Native.Foreground = new IntPtr(123);
+        }
     }
 }
