@@ -23,7 +23,7 @@ Built with C# 5, .NET Framework 4.8 and WinForms. No third-party runtime depende
 
 ## Download and use
 
-Download [KeyHold v0.2.1 portable ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.2.1/KeyHold-v0.2.1-win.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
+Download [KeyHold v0.3.0 portable ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.3.0/KeyHold-v0.3.0-win.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
 
 Requires Windows 11 and .NET Framework 4.8. Extract the complete ZIP, then run `KeyHold.exe`.
 

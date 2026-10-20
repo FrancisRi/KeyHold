@@ -26,7 +26,7 @@
 
 ## 获取与运行
 
-下载 [KeyHold v0.2.1 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.2.1/KeyHold-v0.2.1-win.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
+下载 [KeyHold v0.3.0 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.3.0/KeyHold-v0.3.0-win.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
 
 系统要求：Windows 11、.NET Framework 4.8。无需安装 Python、AutoHotkey 或 Visual Studio。
 
