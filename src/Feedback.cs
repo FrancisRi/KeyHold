@@ -26,7 +26,7 @@ namespace KeyHoldMacro
         }
     }
 
-    // One UI tick can contain a whole start/stop cycle. Announce the last state,
+    // One event batch can contain a whole start/stop cycle. Announce the last state,
     // and suppress an enable acknowledgement invalidated by a later stop ticket.
     internal sealed class FeedbackBatch
     {

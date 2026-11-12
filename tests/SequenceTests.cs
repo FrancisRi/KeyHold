@@ -41,7 +41,7 @@ internal static class SequenceTests
     }
     public static void Run(Action<bool, string> check, Action<Action, string> throws)
     {
-        check(MacroAction.DefaultTimingMs >= Math.Ceiling(1000.0 / 30) && MacroAction.DefaultTimingMs == 40, "default timing includes a 30 Hz logic-frame margin");
+        check(MacroAction.DefaultDurationMs == 40 && MacroAction.DefaultGapMs == 40, "new actions default to 40 ms for duration and gap");
         Profile p = Profile();
         p.Macros[0].BeforeActions.Add(new MacroAction { Key = "1", DurationMs = 40, DelayAfterMs = 10 });
         SequenceFixture f = new SequenceFixture(p);
@@ -194,6 +194,9 @@ internal static class SequenceTests
             File.WriteAllText(path, "{\"Version\":1,\"Name\":\"旧配置\",\"Macros\":[{\"Key\":\"E\",\"X\":100,\"Y\":200}]}");
             Profile old = ProfileStore.Read(path);
             check(old.Version == 2 && old.Macros[0].MouseMode == "Hold" && old.Macros[0].BeforeActions.Count == 0 && old.Macros[0].AfterActions.Count == 0, "v1 configurations load with their original continuous hold behavior");
+            File.WriteAllText(path, "{\"Version\":2,\"Name\":\"旧配置\",\"Macros\":[{\"Key\":\"E\",\"BeforeActions\":[{\"Key\":\"1\"}]}]}");
+            old = ProfileStore.Read(path);
+            check(old.Macros[0].AfterMainDelayMs == 40 && old.Macros[0].BeforeActions[0].DelayAfterMs == 40, "omitted gap fields in imported profiles retain the legacy fallback");
             p = Profile(); p.Macros[0].MouseMode = "Click"; p.Macros[0].MainDurationMs = 12; p.Macros[0].AfterMainDelayMs = 10;
             p.Macros[0].BeforeActions.Add(new MacroAction { Key = "1", DurationMs = 17, DelayAfterMs = 10 });
             p.Macros[0].AfterActions.Add(new MacroAction { Kind = "Click", X = -50, Y = 20, DurationMs = 25, DelayAfterMs = 70 });

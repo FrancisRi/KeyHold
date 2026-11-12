@@ -56,6 +56,8 @@ namespace KeyHoldMacro
 
         private static readonly Dictionary<string, string> English = new Dictionary<string, string>(StringComparer.Ordinal)
         {
+            { "无法加载 Rust 后台组件。请完整解压同一版本的 x64 发行包。", "Could not load the Rust worker. Extract all files from the same x64 release." },
+            { "后台组件无法读取宏配置。", "The worker could not read the macro configuration." },
             { "状态提示音", "Sound cues" },
             { "试听提示音", "Test sound" },
             { "提示音设置无法保存：", "Could not save sound preferences: " },
@@ -155,7 +157,7 @@ namespace KeyHoldMacro
             { "到后置动作间隔 ms", "Gap before after-actions (ms)" },
             { "持续按住，随松键释放", "Hold until key release" },
             { "单次点击", "Single click" },
-            { "前置动作  →  原坐标动作  →  后置动作\r\n短按会完成序列；新键、暂停或 F12 可取消。默认 40ms；30 帧约 33.33ms，10ms 需实测。", "Before-actions  →  Main action  →  After-actions\r\nShort taps finish; another key, pause or F12 cancels. Default: 40ms (30fps = 33.33ms/frame). Test 10ms gaps in-app." },
+            { "前置动作  →  原坐标动作  →  后置动作\r\n短按会完成序列；新键、暂停或 F12 可取消。默认时长 {0} ms，间隔 {1} ms。", "Before-actions  →  Main action  →  After-actions\r\nShort taps finish. Another key, pause or F12 cancels. Default duration {0} ms, gap {1} ms." },
             { "前置动作（原坐标之前）", "Before-actions" },
             { "后置动作（原坐标之后）", "After-actions" },
             { "每组最多 10 个动作。选中坐标动作后可按 F6 在目标应用中取点，不会抢回焦点。", "Up to 10 actions per group. Select a coordinate action, then press F6 in the target app to capture without taking focus." },

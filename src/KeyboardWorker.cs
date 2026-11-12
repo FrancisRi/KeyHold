@@ -1,282 +1,249 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Threading;
+using System.Windows.Forms;
+using Microsoft.Win32.SafeHandles;
 
 namespace KeyHoldMacro
 {
+    // Keep these numbers aligned with rust/src/worker.rs.
+    internal enum WorkerReason
+    {
+        None = 0, Requested = 1, PreparePoint = 2, CancelCountdown = 3, CloseEditor = 4,
+        SessionChanged = 5, Suspend = 6, ActionPoint = 7, KeyCapture = 8, Focus = 9,
+        F8 = 10, F12 = 11, Point = 12, Empty = 20, NeedsRelease = 21, PhysicalKey = 22,
+        Mouse = 23, Keyboard = 24, DisplayChanged = 25, OutsideDisplay = 26,
+        Foreground = 27, Cursor = 28, Thread = 29
+    }
+
     internal sealed class WorkerEvent
     {
         public string Kind, Text;
-        public int X, Y, Key;
-        public int StartVersion;
+        public int X, Y, Key, StartVersion;
+        public WorkerReason Reason;
         public FeedbackCue Cue;
         public IntPtr Window;
-        public WorkerEvent(string kind, string text) { Kind = kind; Text = text; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WorkerNativeEvent
+    {
+        public IntPtr Window;
+        public int Kind, Reason, Cue, Ticket, X, Y, Key;
+        public uint OsError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WorkerBinding { public int Key, First, Count; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WorkerStep { public int Kind, Key, X, Y, Duration, Gap; }
+
+    // This message-only HWND lives on the UI thread independently of the form's handle.
+    internal sealed class WorkerNotifications : NativeWindow, IDisposable
+    {
+        internal const int EventsReady = 0x8001; // WM_APP + 1, shared with the DLL.
+        private readonly Action drain;
+
+        internal WorkerNotifications(Action drain)
+        {
+            this.drain = drain;
+            CreateHandle(new CreateParams { Parent = new IntPtr(-3) }); // HWND_MESSAGE
+        }
+
+        protected override void WndProc(ref Message message)
+        {
+            if (message.Msg == EventsReady) drain();
+            else base.WndProc(ref message);
+        }
+
+        public void Dispose() { DestroyHandle(); }
+    }
+
+    // C# owns JSON and key names. Only validated numeric plans cross into Rust.
+    internal sealed class WorkerSnapshot
+    {
+        public readonly WorkerBinding[] Bindings;
+        public readonly WorkerStep[] Steps;
+        public readonly int Suppress, PauseOnFocusLoss;
+        public WorkerSnapshot(Profile profile)
+        {
+            profile.Validate();
+            List<WorkerBinding> bindings = new List<WorkerBinding>();
+            List<WorkerStep> steps = new List<WorkerStep>();
+            foreach (Macro macro in profile.Macros)
+            {
+                if (!macro.Enabled) continue;
+                int first = steps.Count;
+                foreach (MacroAction action in macro.BeforeActions) steps.Add(Step(action));
+                steps.Add(new WorkerStep { Kind = macro.MouseMode == "Click" ? 2 : 4, X = macro.X, Y = macro.Y,
+                    Duration = macro.MainDurationMs, Gap = macro.AfterActions.Count == 0 ? 0 : macro.AfterMainDelayMs });
+                foreach (MacroAction action in macro.AfterActions) steps.Add(Step(action));
+                bindings.Add(new WorkerBinding { Key = KeyCatalog.Keys[macro.Key], First = first, Count = steps.Count - first });
+            }
+            Bindings = bindings.ToArray(); Steps = steps.ToArray();
+            Suppress = profile.SuppressKeys ? 1 : 0; PauseOnFocusLoss = profile.PauseOnFocusLoss ? 1 : 0;
+        }
+        private static WorkerStep Step(MacroAction action)
+        {
+            return new WorkerStep { Kind = action.Kind == "KeyTap" ? 1 : action.Kind == "Click" ? 2 : 3,
+                Key = action.Kind == "KeyTap" ? KeyCatalog.Keys[action.Key] : 0, X = action.X, Y = action.Y,
+                Duration = action.DurationMs, Gap = action.DelayAfterMs };
+        }
     }
 
     internal sealed class KeyboardWorker : IDisposable
     {
-        public readonly ConcurrentQueue<WorkerEvent> Events = new ConcurrentQueue<WorkerEvent>();
-        private readonly ConcurrentQueue<Action> commands = new ConcurrentQueue<Action>();
-        private readonly ManualResetEvent ready = new ManualResetEvent(false);
-        private readonly Thread thread;
-        private readonly MacroEngine engine;
-        private readonly Stopwatch clock = Stopwatch.StartNew();
-        private System.Threading.Timer sequenceTimer;
-        private readonly HashSet<int> controlDown = new HashSet<int>();
-        private readonly HashSet<int> controlSwallowed = new HashSet<int>();
-        private readonly Native.HookProc hookProc;
-        private uint threadId;
-        private IntPtr hook, target;
-        private bool quitting, pauseOnFocusLoss = true, captureKey;
-        private Exception startupError;
-        private int lastActive = -1;
-        private int startVersion;
-        private readonly FeedbackTransitions feedback = new FeedbackTransitions();
+        private readonly object gate = new object();
+        private readonly WorkerHandle handle;
+
         public KeyboardWorker()
         {
-            engine = new MacroEngine(new WindowsMouse(), new WindowsKeyboard(), delegate { return clock.ElapsedMilliseconds; });
-            hookProc = Hook;
-            thread = new Thread(Run); thread.IsBackground = true;
-            thread.Name = "KeyHold keyboard"; thread.Start();
-            if (!ready.WaitOne(5000)) throw new InvalidOperationException(L.T("键盘监听线程启动超时。"));
-            if (startupError != null) throw new InvalidOperationException(L.T("无法安装全局键盘钩子。"), startupError);
+            try
+            {
+                if (Api.kh_abi_version() != 2) throw ComponentError(null);
+                int[] keys = new int[KeyCatalog.Keys.Count]; KeyCatalog.Keys.Values.CopyTo(keys, 0);
+                uint error;
+                IntPtr value = Api.kh_create(keys, keys.Length, out error);
+                if (value == IntPtr.Zero)
+                {
+                    if (error == 1460) throw new InvalidOperationException(L.T("键盘监听线程启动超时。"));
+                    throw new InvalidOperationException(L.T("无法安装全局键盘钩子。"), new Win32Exception(unchecked((int)error)));
+                }
+                handle = new WorkerHandle(value);
+            }
+            catch (DllNotFoundException ex) { throw ComponentError(ex); }
+            catch (BadImageFormatException ex) { throw ComponentError(ex); }
+            catch (EntryPointNotFoundException ex) { throw ComponentError(ex); }
         }
-        private void Push(string kind, string text) { Push(kind, text, false); }
-        private void Push(string kind, string text, bool confirmStop)
-        { Push(kind, text, confirmStop, StartVersion); }
-        private void Push(string kind, string text, bool confirmStop, int version)
-        {
-            Events.Enqueue(new WorkerEvent(kind, text) { Cue = feedback.Observe(kind, confirmStop), StartVersion = version });
-        }
-        internal int StartVersion { get { return Interlocked.CompareExchange(ref startVersion, 0, 0); } }
-        private void Post(Action action)
-        {
-            if (quitting) return;
-            commands.Enqueue(action);
-            if (!Native.PostThreadMessage(threadId, Native.WM_COMMAND, UIntPtr.Zero, IntPtr.Zero))
-                throw new InvalidOperationException(L.T("后台监听线程已停止，请重新启动程序。"));
-        }
-        // Tickets cross the UI/worker queues. A stop invalidates even requests
-        // that the UI has not yet returned to this thread.
-        public int NewStartRequest() { return Interlocked.Increment(ref startVersion); }
-        private void CancelPendingStart() { Interlocked.Increment(ref startVersion); }
-        private bool CurrentStart(int version) { return version == Interlocked.CompareExchange(ref startVersion, 0, 0); }
+
+        private static InvalidOperationException ComponentError(Exception inner)
+        { return new InvalidOperationException(L.T("无法加载 Rust 后台组件。请完整解压同一版本的 x64 发行包。"), inner); }
+
+        internal int StartVersion { get { lock (gate) return handle.IsClosed ? 0 : Api.kh_ticket(handle); } }
+        public int NewStartRequest() { lock (gate) return handle.IsClosed ? 0 : Api.kh_request_start(handle); }
+        internal void SetNotificationWindow(IntPtr window)
+        { lock (gate) if (!handle.IsClosed) Api.kh_set_notification_window(handle, window); }
+
         public void Start(Profile profile, IntPtr foreground, int version)
         {
-            // Snapshot the profile before crossing threads.
-            Profile copy = new System.Web.Script.Serialization.JavaScriptSerializer()
-                .Deserialize<Profile>(ProfileStore.Serialize(profile));
-            Post(delegate
+            WorkerSnapshot snapshot = new WorkerSnapshot(profile);
+            lock (gate)
             {
-                if (!CurrentStart(version)) return;
-                captureKey = false; engine.Configure(copy);
-                if (foreground == IntPtr.Zero || Native.OwnWindow(foreground) || Native.GetForegroundWindow() != foreground)
-                    throw new InvalidOperationException(L.T("请先切换到目标应用，再按 F8 启用。"));
-                foreach (Macro m in copy.Macros)
-                    if (m.Enabled)
-                    {
-                        WindowsMouse.CheckCoordinates(m.X, m.Y);
-                        foreach (MacroAction a in m.BeforeActions)
-                            if (a.Kind != "KeyTap") WindowsMouse.CheckCoordinates(a.X, a.Y);
-                        foreach (MacroAction a in m.AfterActions)
-                            if (a.Kind != "KeyTap") WindowsMouse.CheckCoordinates(a.X, a.Y);
-                    }
-                // Keys held before enabling must be released and pressed again.
-                for (int k = 1; k < 255; k++)
-                    if (Native.GetAsyncKeyState(k) < 0) engine.MarkAlreadyDown(k);
-                pauseOnFocusLoss = copy.PauseOnFocusLoss;
-                if (!CurrentStart(version)) return;
-                target = foreground; engine.Start();
-                Push("running", L.T("运行中：") + Native.WindowTitle(target), false, version);
-            });
+                if (handle.IsClosed) return;
+                int result = Api.kh_start(handle, foreground, version, snapshot.Bindings, snapshot.Bindings.Length,
+                    snapshot.Steps, snapshot.Steps.Length, snapshot.Suppress, snapshot.PauseOnFocusLoss);
+                if (result == 0) throw new InvalidOperationException(L.T("后台监听线程已停止，请重新启动程序。"));
+                if (result < 0) throw new InvalidOperationException(L.T("后台组件无法读取宏配置。"));
+            }
         }
-        public void Stop(string reason)
-        { Stop(reason, false); }
-        public void Stop(string reason, bool confirmStop)
-        {
-            CancelPendingStart();
-            Post(delegate { captureKey = false; engine.Stop(); Push("stopped", reason, confirmStop); });
-        }
+
+        public void Stop(WorkerReason reason, bool confirmStop = false)
+        { lock (gate) if (!handle.IsClosed) Api.kh_stop(handle, (int)reason, confirmStop ? 1 : 0); }
+
         public void CaptureKey()
         {
-            CancelPendingStart();
-            Post(delegate { engine.Stop(); captureKey = true; Push("stopped", L.T("请按要绑定的单键；F12 取消录入。")); });
+            lock (gate)
+                if (!handle.IsClosed && Api.kh_capture_key(handle) == 0)
+                    throw new InvalidOperationException(L.T("后台监听线程已停止，请重新启动程序。"));
         }
-        private void Fail(Exception ex)
+
+        public bool TryDequeue(out WorkerEvent result)
         {
-            CancelPendingStart();
-            captureKey = false;
-            try { engine.Stop(); } catch { }
-            Push("error", ex.Message);
+            WorkerNativeEvent native;
+            lock (gate)
+                if (handle.IsClosed || Api.kh_poll(handle, out native) == 0) { result = null; return false; }
+            result = Decode(native);
+            return true;
         }
-        private void ArmSequenceTimer()
+
+        internal static WorkerEvent Decode(WorkerNativeEvent e)
         {
-            int? delay = engine.NextActionDelayMs;
-            if (sequenceTimer != null) sequenceTimer.Change(delay.HasValue ? Math.Max(1, delay.Value) : Timeout.Infinite, Timeout.Infinite);
-        }
-        private void CheckFocus()
-        {
-            if (!engine.Enabled) return;
-            IntPtr fg = Native.GetForegroundWindow();
-            if (fg == IntPtr.Zero || Native.OwnWindow(fg) || (pauseOnFocusLoss && fg != target))
-            { CancelPendingStart(); engine.Stop(); Push("stopped", L.T("已暂停：前台窗口发生变化。回到目标应用后按 F8。")); }
-        }
-        private void Run()
-        {
-            UIntPtr timer = UIntPtr.Zero;
-            try
+            string kind;
+            switch (e.Kind)
             {
-                threadId = Native.GetCurrentThreadId();
-                Native.MSG msg; Native.PeekMessage(out msg, IntPtr.Zero, 0, 0, 0);
-                sequenceTimer = new System.Threading.Timer(delegate
-                {
-                    Native.PostThreadMessage(threadId, Native.WM_SEQUENCE, UIntPtr.Zero, IntPtr.Zero);
-                }, null, Timeout.Infinite, Timeout.Infinite);
-                for (int k = 1; k < 255; k++)
-                    if (Native.GetAsyncKeyState(k) < 0)
-                    { engine.MarkAlreadyDown(k); controlDown.Add(k); }
-                hook = Native.SetWindowsHookEx(13, hookProc, Native.GetModuleHandle(null), 0);
-                if (hook == IntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                timer = Native.SetTimer(IntPtr.Zero, new UIntPtr(1), 25, IntPtr.Zero);
-                if (timer == UIntPtr.Zero) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                ready.Set();
-                while (!quitting)
-                {
-                    int result = Native.GetMessage(out msg, IntPtr.Zero, 0, 0);
-                    if (result == 0) break;
-                    if (result < 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
-                    if (msg.message == Native.WM_COMMAND)
-                    {
-                        Action action;
-                        while (commands.TryDequeue(out action))
-                            try { action(); } catch (Exception ex) { Fail(ex); }
-                    }
-                    else if (msg.message == Native.WM_TIMER)
-                    {
-                        try
-                        {
-                            if (!engine.Enabled && engine.NeedsRelease) engine.Stop(); // Retry failed releases.
-                            CheckFocus();
-                            if (lastActive != engine.ActiveKey)
-                            {
-                                lastActive = engine.ActiveKey;
-                                WorkerEvent e = new WorkerEvent("active", ""); e.Key = lastActive; Events.Enqueue(e);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            // Avoid repeating a release error every timer tick.
-                            bool wasEnabled = engine.Enabled;
-                            CancelPendingStart();
-                            try { engine.Stop(); } catch { }
-                            if (wasEnabled) Push("error", ex.Message);
-                        }
-                    }
-                    else if (msg.message == Native.WM_SEQUENCE)
-                    {
-                        try { CheckFocus(); engine.Advance(); }
-                        catch (Exception ex) { Fail(ex); }
-                    }
-                    else { Native.TranslateMessage(ref msg); Native.DispatchMessage(ref msg); }
-                    ArmSequenceTimer();
-                }
+                case 1: kind = "start"; break;
+                case 2: kind = "running"; break;
+                case 3: kind = "stopped"; break;
+                case 4: kind = "error"; break;
+                case 5: kind = "point"; break;
+                case 6: kind = "key"; break;
+                default: throw ComponentError(null);
             }
-            catch (Exception ex)
+            return new WorkerEvent { Kind = kind, Reason = (WorkerReason)e.Reason,
+                Text = e.Kind == 2 ? L.T("运行中：") + Native.WindowTitle(e.Window) : Message(e),
+                Window = e.Window, X = e.X, Y = e.Y, Key = e.Key, StartVersion = e.Ticket, Cue = (FeedbackCue)e.Cue };
+        }
+
+        private static string Message(WorkerNativeEvent e)
+        {
+            switch ((WorkerReason)e.Reason)
             {
-                startupError = ex; Push("error", L.T("后台线程停止：") + ex.Message);
-            }
-            finally
-            {
-                CancelPendingStart();
-                try { engine.Stop(); } catch { }
-                if (sequenceTimer != null) sequenceTimer.Dispose();
-                if (hook != IntPtr.Zero) Native.UnhookWindowsHookEx(hook);
-                if (timer != UIntPtr.Zero) Native.KillTimer(IntPtr.Zero, timer);
-                quitting = true; ready.Set();
+                case WorkerReason.Requested: return L.T("已停止并请求释放鼠标。");
+                case WorkerReason.PreparePoint: return L.T("移到目标应用，把鼠标放到目标位置，按 F6 取点。");
+                case WorkerReason.CancelCountdown: return L.T("已取消启用倒计时。");
+                case WorkerReason.CloseEditor: return L.T("请先关闭个性化设置窗口，再按 F8 启用。");
+                case WorkerReason.SessionChanged: return L.T("会话发生变化，已暂停。");
+                case WorkerReason.Suspend: return L.T("系统休眠，已暂停。");
+                case WorkerReason.ActionPoint: return L.T("请切换到目标应用，按 F6 为个性化动作取点。");
+                case WorkerReason.KeyCapture: return L.T("请按要绑定的单键；F12 取消录入。");
+                case WorkerReason.Focus: return L.T("已暂停：前台窗口发生变化。回到目标应用后按 F8。");
+                case WorkerReason.F8: return L.T("已暂停（F8）。");
+                case WorkerReason.F12: return L.T("已紧急停止并释放鼠标（F12）。");
+                case WorkerReason.Point: return L.T("已取点；宏保持暂停。按 F8 启用。");
+                case WorkerReason.Empty: return L.T("至少启用一个宏后才能开始。");
+                case WorkerReason.NeedsRelease: return L.T("输入释放尚未成功，请先按 F12 重试。");
+                case WorkerReason.PhysicalKey:
+                    foreach (KeyValuePair<string, int> k in KeyCatalog.Keys)
+                        if (k.Value == e.Key) return L.F("待点按的 {0} 键正被实体键盘按住，请先松开。", k.Key);
+                    return L.F("待点按的 {0} 键正被实体键盘按住，请先松开。", e.Key);
+                case WorkerReason.Mouse: return L.T("Windows 未完整接受鼠标输入。若目标程序以管理员运行，请以相同权限启动本程序。");
+                case WorkerReason.Keyboard: return L.T("Windows 未接受键盘输入，请检查目标程序权限。");
+                case WorkerReason.DisplayChanged: return L.T("显示器布局已改变，请重新取点。");
+                case WorkerReason.OutsideDisplay: return L.F("目标坐标 ({0}, {1}) 不在当前任何显示器内，请重新取点。", e.X, e.Y);
+                case WorkerReason.Foreground: return L.T("请先切换到目标应用，再按 F8 启用。");
+                case WorkerReason.Cursor: return L.T("无法读取当前鼠标坐标。");
+                case WorkerReason.Thread:
+                    return e.OsError == 0 ? L.T("后台监听线程已停止，请重新启动程序。") :
+                        L.T("后台线程停止：") + new Win32Exception(unchecked((int)e.OsError)).Message;
+                default: return "";
             }
         }
-        private IntPtr Hook(int code, IntPtr wp, IntPtr lp)
+
+        public void Dispose() { lock (gate) handle.Dispose(); }
+
+        private sealed class WorkerHandle : SafeHandleZeroOrMinusOneIsInvalid
         {
-            if (code < 0) return Native.CallNextHookEx(hook, code, wp, lp);
-            Native.KBD data = (Native.KBD)Marshal.PtrToStructure(lp, typeof(Native.KBD));
-            if ((data.flags & 0x10) != 0) return Native.CallNextHookEx(hook, code, wp, lp);
-            int message = wp.ToInt32(), vk = (int)data.vk;
-            bool isDown = message == 0x100 || message == 0x104;
-            bool isUp = message == 0x101 || message == 0x105;
-            if (!isDown && !isUp) return Native.CallNextHookEx(hook, code, wp, lp);
-            bool block = false;
-            bool wasSwallowed = engine.IsSwallowed(vk);
-            try
-            {
-                bool first = isDown && controlDown.Add(vk);
-                if (isUp)
-                {
-                    controlDown.Remove(vk);
-                    block = controlSwallowed.Remove(vk);
-                }
-                if (isDown && controlSwallowed.Contains(vk)) block = true;
-                if (vk == 0x75 || vk == 0x77 || vk == 0x7B) // F6, F8, F12.
-                {
-                    if (isDown) { block = true; controlSwallowed.Add(vk); }
-                    if (first)
-                    {
-                        if (vk == 0x7B)
-                        { CancelPendingStart(); captureKey = false; engine.Stop(); Push("stopped", L.T("已紧急停止并释放鼠标（F12）。"), true); }
-                        else if (vk == 0x77)
-                        {
-                            captureKey = false;
-                            if (engine.Enabled) { CancelPendingStart(); engine.Stop(); Push("stopped", L.T("已暂停（F8）。")); }
-                            else
-                            {
-                                WorkerEvent e = new WorkerEvent("start", "");
-                                e.StartVersion = NewStartRequest();
-                                e.Window = Native.GetForegroundWindow(); Events.Enqueue(e);
-                            }
-                        }
-                        else
-                        {
-                            CancelPendingStart(); captureKey = false; engine.Stop();
-                            Native.POINT p;
-                            if (!Native.GetCursorPos(out p)) throw new InvalidOperationException(L.T("无法读取当前鼠标坐标。"));
-                            WorkerEvent e = new WorkerEvent("point", ""); e.X = p.x; e.Y = p.y; Events.Enqueue(e);
-                            Push("stopped", L.T("已取点；宏保持暂停。按 F8 启用。"));
-                        }
-                    }
-                }
-                else if (captureKey && first)
-                {
-                    // Modifier/Windows keys cannot be bound; let their normal releases through.
-                    bool supported = KeyCatalog.Keys.ContainsValue(vk);
-                    if (supported)
-                    {
-                        captureKey = false; controlSwallowed.Add(vk); block = true;
-                        WorkerEvent e = new WorkerEvent("key", ""); e.Key = vk; Events.Enqueue(e);
-                        engine.MarkAlreadyDown(vk);
-                    }
-                }
-                else
-                {
-                    if (isDown) CheckFocus();
-                    block = engine.KeyEvent(vk, isDown) || block;
-                }
-            }
-            catch (Exception ex) { block = block || wasSwallowed || engine.IsSwallowed(vk); Fail(ex); }
-            ArmSequenceTimer();
-            return block ? new IntPtr(1) : Native.CallNextHookEx(hook, code, wp, lp);
+            public WorkerHandle(IntPtr value) : base(true) { SetHandle(value); }
+            protected override bool ReleaseHandle() { Api.kh_destroy(handle); return true; }
         }
-        public void Dispose()
+
+        private static class Api
         {
-            CancelPendingStart();
-            if (!quitting)
-            {
-                Post(delegate { try { engine.Stop(); } finally { quitting = true; } });
-                if (!thread.Join(3000))
-                    Native.PostThreadMessage(threadId, Native.WM_QUIT, UIntPtr.Zero, IntPtr.Zero);
-            }
+            private const string Dll = "keyhold_worker.dll";
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            [DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory)]
+            public static extern uint kh_abi_version();
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern IntPtr kh_create([In] int[] keys, int count, out uint error);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern void kh_destroy(IntPtr handle);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern int kh_ticket(WorkerHandle handle);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern int kh_request_start(WorkerHandle handle);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern int kh_start(WorkerHandle handle, IntPtr foreground, int version,
+                [In] WorkerBinding[] bindings, int count, [In] WorkerStep[] steps, int stepCount, int suppress, int pause);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern void kh_stop(WorkerHandle handle, int reason, int confirm);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern int kh_capture_key(WorkerHandle handle);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern void kh_set_notification_window(WorkerHandle handle, IntPtr window);
+            [DllImport(Dll, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+            public static extern int kh_poll(WorkerHandle handle, out WorkerNativeEvent native);
         }
     }
 }

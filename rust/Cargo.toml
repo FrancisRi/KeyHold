@@ -1,0 +1,10 @@
+[package]
+name = "keyhold-worker"
+version = "0.4.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+name = "keyhold_worker"
+crate-type = ["cdylib"]

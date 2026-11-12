@@ -24,6 +24,8 @@ internal static class UiTests
     private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wp, IntPtr lp);
     [DllImport("user32.dll")]
     private static extern bool GetUpdateRect(IntPtr window, IntPtr rect, bool erase);
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern bool PostMessageW(IntPtr window, int message, IntPtr wp, IntPtr lp);
     private static int checks;
     private static void Check(bool value, string message)
     { if (!value) throw new Exception("FAIL: " + message); checks++; }
@@ -279,6 +281,8 @@ internal static class UiTests
         try
         {
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+            TestWorkerBridge();
+            TestWorkerNotifications();
             L.Language = "zh-CN"; Run(args);
             L.Language = "en"; Run(args.Length > 0 ? new string[] { System.IO.Path.ChangeExtension(args[0], ".english.png") } : args);
             TestSoundControls();
@@ -286,6 +290,61 @@ internal static class UiTests
             L.Language = "zh-CN"; Console.WriteLine("PASS: " + checks + " editor checks (no input injection)."); return 0;
         }
         catch (Exception ex) { Console.WriteLine(ex.GetBaseException().Message); return 1; }
+    }
+    private static void TestWorkerBridge()
+    {
+        Type api = typeof(KeyboardWorker).GetNestedType("Api", BindingFlags.NonPublic);
+        Check((uint)api.GetMethod("kh_abi_version").Invoke(null, null) == 2u,
+            "actual Rust DLL loads without starting a hook");
+        bool besideRunner = false;
+        using (System.Diagnostics.Process process = System.Diagnostics.Process.GetCurrentProcess())
+            foreach (System.Diagnostics.ProcessModule module in process.Modules)
+                if (String.Equals(module.FileName, System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "keyhold_worker.dll"),
+                    StringComparison.OrdinalIgnoreCase)) { besideRunner = true; break; }
+        Check(besideRunner, "native component is resolved next to the test executable rather than the working directory");
+        Check(Marshal.SizeOf(typeof(WorkerBinding)) == 12 && Marshal.SizeOf(typeof(WorkerStep)) == 24 &&
+            Marshal.SizeOf(typeof(WorkerNativeEvent)) == 40, "managed layout matches the Rust x64 ABI");
+        Profile profile = new Profile { SuppressKeys = false, PauseOnFocusLoss = false };
+        Macro macro = new Macro { Key = "E", X = -100, Y = 250, MainDurationMs = 45, AfterMainDelayMs = 11 };
+        macro.BeforeActions.Add(new MacroAction { Key = "1", DurationMs = 40, DelayAfterMs = 10 });
+        macro.AfterActions.Add(new MacroAction { Kind = "Move", X = -10, Y = 80, DelayAfterMs = 0 });
+        profile.Macros.Add(macro);
+        profile.Macros.Add(new Macro { Key = "F", Enabled = false });
+        WorkerSnapshot snapshot = new WorkerSnapshot(profile);
+        Check(snapshot.Bindings.Length == 1 && snapshot.Bindings[0].Key == 69 && snapshot.Bindings[0].First == 0 &&
+            snapshot.Bindings[0].Count == 3 && snapshot.Suppress == 0 && snapshot.PauseOnFocusLoss == 0,
+            "bridge copies only enabled bindings and independent profile options");
+        Check(snapshot.Steps[0].Kind == 1 && snapshot.Steps[0].Key == 49 && snapshot.Steps[0].Gap == 10 &&
+            snapshot.Steps[1].Kind == 4 && snapshot.Steps[1].X == -100 && snapshot.Steps[1].Duration == 45 &&
+            snapshot.Steps[1].Gap == 11 && snapshot.Steps[2].Kind == 3 && snapshot.Steps[2].X == -10,
+            "bridge preserves prefix, main and postfix coordinates and timing");
+        macro.AfterActions.Clear();
+        Check(new WorkerSnapshot(profile).Steps[1].Gap == 0 && snapshot.Steps.Length == 3,
+            "main action has no trailing gap without postfix; snapshots are independent");
+        L.Language = "en";
+        WorkerEvent stopped = KeyboardWorker.Decode(new WorkerNativeEvent { Kind = 3, Reason = 11, Cue = 3, Ticket = 23 });
+        Check(stopped.Reason == WorkerReason.F12 && stopped.Cue == FeedbackCue.Emergency && stopped.StartVersion == 23 &&
+            stopped.Text == "Emergency stop: mouse released (F12).", "typed emergency event preserves localized UI feedback and ticket");
+        L.Language = "zh-CN";
+    }
+    private static void TestWorkerNotifications()
+    {
+        int received = 0;
+        using (MainForm form = new MainForm(true))
+        using (WorkerNotifications notifications = new WorkerNotifications(delegate { received++; }))
+        {
+            ShowPreview(form);
+            IntPtr receiver = notifications.Handle;
+            typeof(Control).GetMethod("RecreateHandle", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(form, null);
+            form.Hide();
+            Check(notifications.Handle == receiver && PostMessageW(receiver, WorkerNotifications.EventsReady, IntPtr.Zero, IntPtr.Zero),
+                "worker receiver survives recreation of the form handle");
+            Check(received == 0, "posted worker notification is asynchronous");
+            Application.DoEvents();
+            Check(!form.Visible && received == 1, "hidden configuration still dispatches worker notifications");
+            Check(!Field<Timer>(form, "cursorTimer").Enabled && !Field<Timer>(form, "countdownTimer").Enabled,
+                "preview has no active input or countdown timers");
+        }
     }
     private static void TestWindowReplacement()
     {
@@ -372,6 +431,8 @@ internal static class UiTests
             Check(Field<NumericUpDown>(dialog, "mainDuration").Enabled, "click mode enables main click duration");
             Check(Field<Label>(dialog, "durationCaption").Text == L.T("点击时长 ms"), "click mode names its ordinary click duration");
             Call(dialog, "Add", after, L.T("点击坐标"));
+            Check(Convert.ToInt32(after.Rows[0].Cells["duration"].Value) == 40 && Convert.ToInt32(after.Rows[0].Cells["gap"].Value) == 40,
+                "new actions start with 40 ms duration and gap");
             Check(String.IsNullOrEmpty(Convert.ToString(after.Rows[0].Cells["key"].Value)) && after.Rows[0].Cells["key"].ReadOnly,
                 "new coordinate click does not display a keyboard binding");
             after.Rows[0].Cells["kind"].Value = L.T("按键点按");
@@ -475,7 +536,7 @@ internal static class UiTests
             Check(grid.Rows.Count == 15 && Field<KeyboardWorker>(main, "worker") == null, "main-window preview has 15 rows without installing an input hook");
             Check(Field<Button>(main, "start").Enabled && Field<Label>(main, "status").Text == L.T("已暂停。先配置按键和坐标，再切到目标应用按 F8。"), "redesigned main view starts paused with configuration available");
             Profile p = new Profile { Name = "我的工作配置" };
-            Macro first = new Macro { Key = "X", X = 800, Y = 600, Label = "先点按 1，再执行原坐标" };
+            Macro first = new Macro { Key = "X", X = 800, Y = 600, Label = "先点按 1，再执行原坐标", AfterMainDelayMs = 15 };
             first.BeforeActions.Add(new MacroAction { Key = "1", DelayAfterMs = 10 }); p.Macros.Add(first);
             Macro second = new Macro { Key = "C", X = 1024, Y = 720, MouseMode = "Click", Label = "两个独立坐标点击" };
             second.AfterActions.Add(new MacroAction { Kind = "Click", X = 1200, Y = 760 }); p.Macros.Add(second);
@@ -483,6 +544,12 @@ internal static class UiTests
             Call(main, "LoadProfile", p, null);
             Profile read = (Profile)typeof(MainForm).GetMethod("GetProfile", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(main, null);
             Check(read.Macros.Count == 3 && read.Macros[0].BeforeActions[0].Key == "1" && read.Macros[1].AfterActions[0].X == 1200, "new main layout preserves per-row customization through profile load and readback");
+            grid.Rows[3].Cells["key"].Value = "Q";
+            read = (Profile)typeof(MainForm).GetMethod("GetProfile", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(main, null);
+            Check(read.Macros[3].MainDurationMs == 40 && read.Macros[3].AfterMainDelayMs == 40 &&
+                read.Macros[0].AfterMainDelayMs == 15 && read.Macros[0].BeforeActions[0].DelayAfterMs == 10,
+                "new bindings use a 40 ms gap and loaded actions retain their configured gap");
+            Call(main, "LoadProfile", p, null);
             main.PreviewTheme(true);
             Check(!Field<Button>(main, "start").IsDisposed && !Field<bool>(main, "dirty"), "theme changes do not alter configuration or dirty state");
             Call(main, "SetRunning", true);

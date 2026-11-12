@@ -54,7 +54,8 @@ namespace KeyHoldMacro
             options.Controls.Add(modeHelp, 0, 2); options.SetColumnSpan(modeHelp, 3); mainCard.Controls.Add(options); root.Controls.Add(mainCard, 0, 1);
 
             FluentCard sequenceInfo = new FluentCard { Dock = DockStyle.Fill, Padding = new Padding(16, 8, 16, 8), Margin = new Padding(0, 0, 0, 10) };
-            Label explanation = FluentUi.Text(L.T("前置动作  →  原坐标动作  →  后置动作\r\n短按会完成序列；新键、暂停或 F12 可取消。默认 40ms；30 帧约 33.33ms，10ms 需实测。"), 9F, true);
+            Label explanation = FluentUi.Text(L.F("前置动作  →  原坐标动作  →  后置动作\r\n短按会完成序列；新键、暂停或 F12 可取消。默认时长 {0} ms，间隔 {1} ms。",
+                MacroAction.DefaultDurationMs, MacroAction.DefaultGapMs), 9F, true);
             explanation.Dock = DockStyle.Fill; explanation.AutoSize = false; sequenceInfo.Controls.Add(explanation); root.Controls.Add(sequenceInfo, 0, 2);
             tabs.Dock = DockStyle.Fill; tabs.Margin = new Padding(0);
             tabs.AddPage(Page(L.T("前置动作（原坐标之前）"), before), L.T("前置动作（原坐标之前）")); tabs.AddPage(Page(L.T("后置动作（原坐标之后）"), after), L.T("后置动作（原坐标之后）"));
@@ -158,7 +159,7 @@ namespace KeyHoldMacro
         private void Add(DataGridView grid, string kind)
         {
             if (grid.Rows.Count >= 10) { note.Text = L.T("前置和后置分别最多 10 个动作。"); return; }
-            int i = grid.Rows.Add(kind, kind == L.T("按键点按") ? "1" : "", original.X, original.Y, MacroAction.DefaultTimingMs, MacroAction.DefaultTimingMs);
+            int i = grid.Rows.Add(kind, kind == L.T("按键点按") ? "1" : "", original.X, original.Y, MacroAction.DefaultDurationMs, MacroAction.DefaultGapMs);
             grid.CurrentCell = grid.Rows[i].Cells["kind"]; SetEditable(grid.Rows[i]);
         }
         private void Swap(DataGridView grid, int delta)

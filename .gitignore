@@ -10,6 +10,7 @@
 /dist/
 /bin/
 /obj/
+/rust/target/
 
 # Editor and local assistant state.
 /.vs/

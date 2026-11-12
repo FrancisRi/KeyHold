@@ -1,5 +1,16 @@
 # 更新记录
 
+## 0.4.0 — 2026-11-12
+
+- Windows x64 版本改用 Rust 执行宏状态机、低级键盘钩子、延迟调度和输入释放，保留 WinForms 界面及现有 JSON 配置。
+- Rust 主动向界面投递后台事件。暂停时按需唤醒，托盘驻留时停止界面轮询，启用且空闲时优先处理 Windows 前台通知。
+- 支持高分辨率定时器以减少短间隔的唤醒偏差。新建动作时长和间隔均默认 40 ms，已保存的自定义值照常读取。
+- Windows x64 便携包随附 `keyhold_worker.dll`，请完整解压。Rust 工具链仅用于源码构建，构建不依赖外部 crate。
+
+验证：24 项 Rust 测试、911 项 C# 检查通过。独占全屏和目标应用的实际输入识别需要在目标环境验证。
+
+English: Added a native Rust worker for macro execution and input, event-driven UI notifications, foreground notifications to reduce idle polling, and high-resolution scheduling. The Windows x64 ZIP includes the required DLL. New durations and gaps default to 40 ms; existing profiles retain saved timings.
+
 ## 0.3.0 — 2026-10-19
 
 - 新增默认开启的状态提示音：成功启用为上行双音，暂停为下行双音，紧急停止及错误分别为不同的三短音。

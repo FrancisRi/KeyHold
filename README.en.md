@@ -4,7 +4,7 @@
 
 A background keyboard and mouse macro tool for **Windows 11**. Map a single key to a screen coordinate: pressing it moves the cursor and holds the left mouse button; releasing it releases the button. Add before-actions and after-actions to customize each key.
 
-Built with C# 5, .NET Framework 4.8 and WinForms. No third-party runtime dependencies or in-game overlay. **KeyHold always starts paused.**
+KeyHold uses C# WinForms (.NET Framework 4.8) with a Rust worker for the macro engine, keyboard hook, scheduling and simulated input. **KeyHold always starts paused** and runs without an in-game overlay.
 
 ## Features
 
@@ -23,9 +23,9 @@ Built with C# 5, .NET Framework 4.8 and WinForms. No third-party runtime depende
 
 ## Download and use
 
-Download [KeyHold v0.3.0 portable ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.3.0/KeyHold-v0.3.0-win.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
+Download [KeyHold v0.4.0 portable ZIP for Windows x64](https://github.com/FrancisRi/KeyHold/releases/download/v0.4.0/KeyHold-v0.4.0-win-x64.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
 
-Requires Windows 11 and .NET Framework 4.8. Extract the complete ZIP, then run `KeyHold.exe`.
+Requires Windows 11 x64 and .NET Framework 4.8. Extract the complete ZIP and run `KeyHold.exe` alongside `KeyHold.exe.config` and `keyhold_worker.dll`.
 
 1. Enter a profile name and choose a macro key.
 2. Select its row, position the cursor in the target application and press **F6** to capture the point.
@@ -53,25 +53,26 @@ Customization runs **before-actions → main action → after-actions** on key-d
 
 A physical key release lets a finite sequence finish. If a before-action delayed the main Hold, releasing the trigger early turns that Hold into one timed click. An already-active persistent Hold still releases immediately on key-up. A newer macro press, pause, F6/F12, reconfiguration or focus-loss pause cancels the previous sequence immediately. Keyboard auto-repeat does not restart sequences.
 
-At 30 logical frames/second, one frame is about 33.33ms. New durations and gaps default to **40ms** with some margin. They remain editable: durations are 1–60000ms and gaps are 0–60000ms. Gaps start when the previous action actually finishes. A 10ms gap is allowed, but neither 10ms nor the default guarantees recognition by the target application. Macros without customization remain immediate.
+New action durations and gaps both default to **40 ms**. Durations are editable from 1 to 60,000 ms and gaps from 0 to 60,000 ms. Gaps start when the previous action finishes. At 30 logical frames per second, a frame lasts about 33.33 ms, so test short gaps in the target application. Macros without customization remain immediate.
 
 Coordinates are physical desktop pixels. Capture them again after changing the display layout or the target application's position.
 
 ## Build and test
 
-Run in native Windows PowerShell or Command Prompt:
+Install [rustup](https://rustup.rs/), then run in native Windows PowerShell:
 
 ```powershell
 git clone https://github.com/FrancisRi/KeyHold.git
 cd KeyHold
+rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\Build.cmd
 .\Test.cmd
 .\Start.cmd
 ```
 
-The scripts use the .NET Framework C# compiler included with Windows and pause before returning. Visual Studio, Python and AutoHotkey are not required.
+The build uses the Rust x64 GNU toolchain and the .NET Framework C# compiler. It runs offline after the toolchain is installed. The `.cmd` build and test scripts pause before returning; invoke `tools/Build.ps1` directly for an unattended build, or pass `-Test` for the suite.
 
-The default suites perform **895 checks**: 291 core/sequence, 32 worker and 572 UI checks. They use fake input and fake audio output, install no real keyboard hooks, and produce no simulated mouse/keyboard input or actual sound. Tests cover confirmed state cues, failed/canceled starts, cue batching, PCM data, preference persistence and both languages. UI checks need a Windows desktop and cover themes and minimum-window layouts. Existing version 1/2 JSON profiles remain compatible.
+The default suites run **24 Rust tests** and **911 C# checks** (292 reference engine and profile/feedback checks, 32 reference worker checks, 587 UI and bridge checks). The old C# engine and worker are test references only. Tests use fake input and audio; the DLL-loading check does not install a keyboard hook. UI checks need a Windows desktop. Existing version 1/2 JSON profiles remain compatible.
 
 Optional desktop checks are separate from `Test.cmd`: `ScrollInteractionTests.cs` moves the real cursor only inside its own preview; `StartupPaintTests.cs` displays preview windows and captures startup and restore/hover frames after key selection and a borderless fullscreen cover (not an exclusive display-mode switch). Both use previews without macro listeners.
 

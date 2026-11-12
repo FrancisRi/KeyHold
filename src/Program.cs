@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Threading;
@@ -8,8 +9,8 @@ using Microsoft.Win32;
 
 [assembly: System.Reflection.AssemblyTitle("KeyHold")]
 [assembly: System.Reflection.AssemblyProduct("KeyHold")]
-[assembly: System.Reflection.AssemblyVersion("0.3.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("0.3.0.0")]
+[assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("0.4.0.0")]
 
 namespace KeyHoldMacro
 {
@@ -68,7 +69,10 @@ namespace KeyHoldMacro
     {
         private readonly string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KeyHoldMacro", "Profiles");
         private readonly KeyboardWorker worker;
-        private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+        private readonly WorkerNotifications workerNotifications;
+        private readonly System.Windows.Forms.Timer cursorTimer = new System.Windows.Forms.Timer { Interval = 40 };
+        private readonly System.Windows.Forms.Timer countdownTimer = new System.Windows.Forms.Timer();
+        private readonly Stopwatch countdownClock = new Stopwatch();
         private readonly NotifyIcon tray = new NotifyIcon();
         private readonly DataGridView grid = new FluentGrid();
         private readonly ComboBox profiles = new FluentComboBox();
@@ -87,10 +91,9 @@ namespace KeyHoldMacro
         private int previewSoundIndex;
         private readonly bool previewOnly;
         internal string NextLanguage { get; private set; }
-        private bool loading, dirty, closing;
+        private bool loading, dirty, closing, drainingWorkerEvents;
         private string currentPath, loadedName;
-        private int captureRow, countdown, countdownVersion;
-        private DateTime startAt;
+        private int captureRow, countdownVersion;
         private Point? lastCursor;
         private Rectangle lastDesktop;
         private MacroEditor editing;
@@ -105,7 +108,6 @@ namespace KeyHoldMacro
             {
                 soundEnabled = FeedbackPreference.Read(FeedbackPreference.PathName);
                 audio = new FeedbackAudio(); soundSink = audio.Play;
-                Disposed += delegate { audio.Dispose(); };
             }
             Text = "KeyHold";
             ClientSize = new Size(1240, 920); MinimumSize = new Size(1080, 820);
@@ -115,21 +117,32 @@ namespace KeyHoldMacro
             if (previewOnly)
             {
                 LoadProfile(new Profile(), null); RefreshAppearance();
-                Disposed += delegate { tray.Dispose(); timer.Dispose(); };
                 return;
             }
-            worker = new KeyboardWorker();
-            ConfigureTray();
-            LoadProfile(new Profile(), null);
-            RefreshProfiles();
-            TryLoadLast();
-            RefreshAppearance();
-            timer.Interval = 40; timer.Tick += Tick; timer.Start();
-            Resize += delegate { if (WindowState == FormWindowState.Minimized) Hide(); };
-            FormClosing += OnClosing;
-            SystemEvents.SessionSwitch += SessionChanged;
-            SystemEvents.PowerModeChanged += PowerChanged;
-            Shown += delegate { grid.ClearSelection(); grid.Rows[0].Selected = true; };
+            try
+            {
+                worker = new KeyboardWorker();
+                ConfigureTray();
+                LoadProfile(new Profile(), null);
+                RefreshProfiles();
+                TryLoadLast();
+                RefreshAppearance();
+                cursorTimer.Tick += RefreshCursor;
+                countdownTimer.Tick += TickCountdown;
+                VisibleChanged += UpdateCursorTimer;
+                Resize += delegate
+                {
+                    if (WindowState == FormWindowState.Minimized) Hide();
+                    UpdateCursorTimer(this, EventArgs.Empty);
+                };
+                FormClosing += OnClosing;
+                SystemEvents.SessionSwitch += SessionChanged;
+                SystemEvents.PowerModeChanged += PowerChanged;
+                Shown += delegate { grid.ClearSelection(); grid.Rows[0].Selected = true; };
+                workerNotifications = new WorkerNotifications(DrainWorkerEvents);
+                worker.SetNotificationWindow(workerNotifications.Handle);
+            }
+            catch { Dispose(); throw; }
         }
 
         private Button CreateButton(string text, EventHandler action, int width)
@@ -248,7 +261,7 @@ namespace KeyHoldMacro
             p.Controls.Add(CreateButton(L.T("录入选中行按键"), delegate { captureRow = SelectedRow(); worker.CaptureKey(); }, 152));
             p.Controls.Add(CreateButton(L.T("准备取点（F6）"), delegate
             {
-                captureRow = SelectedRow(); worker.Stop(L.T("移到目标应用，把鼠标放到目标位置，按 F6 取点。"));
+                captureRow = SelectedRow(); worker.Stop(WorkerReason.PreparePoint);
                 picked.Text = L.F("待取点：第 {0} 行；切换到目标应用后按 F6。", captureRow + 1);
             }, 148));
             p.Controls.Add(CreateButton(L.T("个性化设置"), delegate { EditMacro(SelectedRow()); }, 118));
@@ -278,8 +291,14 @@ namespace KeyHoldMacro
             start.Text = L.T("3 秒后启用并最小化"); start.Width = 218; start.Height = 38; start.Margin = new Padding(0, 3, 10, 3);
             start.Click += delegate
             {
-                if (countdown > 0) { CancelCountdown(); worker.Stop(L.T("已取消启用倒计时。")); return; }
-                try { GetProfile(); countdownVersion = worker.NewStartRequest(); countdown = 3; startAt = DateTime.UtcNow.AddSeconds(3); status.Text = L.T("请切换到目标应用，3 秒后启用……"); }
+                if (countdownTimer.Enabled) { CancelCountdown(); worker.Stop(WorkerReason.CancelCountdown); return; }
+                try
+                {
+                    GetProfile(); countdownVersion = worker.NewStartRequest();
+                    countdownClock.Restart();
+                    countdownTimer.Start(); TickCountdown(this, EventArgs.Empty);
+                    status.Text = L.T("请切换到目标应用，3 秒后启用……");
+                }
                 catch (Exception ex) { Error(ex.Message); }
             };
             p.Controls.Add(start);
@@ -330,66 +349,106 @@ namespace KeyHoldMacro
             runState.ForeColor = value ? Palette.Success : Palette.Muted;
             status.ForeColor = value ? Palette.Success : Palette.Text;
         }
-        private void Tick(object sender, EventArgs args)
+        private void UpdateCursorTimer(object sender, EventArgs args)
         {
-            Native.POINT p;
-            // Keep processing worker events while hidden, but do not repaint an
-            // invisible window or repeatedly format an unchanged cursor label.
-            if (Visible && WindowState != FormWindowState.Minimized && Native.GetCursorPos(out p))
-                UpdateCursor(p.x, p.y, Native.Desktop);
-            WorkerEvent e;
-            FeedbackBatch feedback = new FeedbackBatch();
-            while (worker.Events.TryDequeue(out e))
+            if (closing) return;
+            if (Visible && WindowState != FormWindowState.Minimized)
             {
-                feedback.Add(e.Cue, e.StartVersion);
-                if (e.Kind == "start")
+                if (!cursorTimer.Enabled)
                 {
-                    CancelCountdown();
-                    if (editing != null) { worker.Stop(L.T("请先关闭个性化设置窗口，再按 F8 启用。")); continue; }
-                    try { worker.Start(GetProfile(), e.Window, e.StartVersion); }
-                    catch (Exception ex) { Error(ex.Message); }
-                }
-                else if (e.Kind == "running") { SetRunning(true); status.Text = e.Text; }
-                else if (e.Kind == "stopped") { CancelCountdown(); SetRunning(false); status.Text = e.Text; if (e.Text.Contains("F12")) actionPoint = null; }
-                else if (e.Kind == "error") { feedback.Clear(); actionPoint = null; CancelCountdown(); SetRunning(false); Error(e.Text); }
-                else if (e.Kind == "point")
-                {
-                    if (actionPoint != null)
-                    {
-                        Action<int, int> receive = actionPoint; actionPoint = null;
-                        receive(e.X, e.Y); SetRunning(false); continue;
-                    }
-                    SetRunning(false); int row = SelectedRow();
-                    grid.Rows[row].Cells["x"].Value = e.X; grid.Rows[row].Cells["y"].Value = e.Y;
-                    picked.Text = L.F("第 {0} 行已取点：({1}, {2})", row + 1, e.X, e.Y);
-                    Changed(this, EventArgs.Empty);
-                    tray.ShowBalloonTip(1500, L.T("已读取鼠标坐标"), picked.Text, ToolTipIcon.Info);
-                }
-                else if (e.Kind == "key")
-                {
-                    foreach (KeyValuePair<string, int> k in KeyCatalog.Keys)
-                        if (k.Value == e.Key) { grid.Rows[captureRow].Cells["key"].Value = k.Key; break; }
-                    grid.Rows[captureRow].Cells["enabled"].Value = true;
-                    status.Text = L.F("第 {0} 行按键已录入。", captureRow + 1);
+                    RefreshCursor(sender, args); cursorTimer.Start();
                 }
             }
-            PlayFeedback(feedback.Take(worker.StartVersion), false);
-            if (countdown > 0)
+            else cursorTimer.Stop();
+        }
+        private void RefreshCursor(object sender, EventArgs args)
+        {
+            Native.POINT point;
+            if (Visible && WindowState != FormWindowState.Minimized && Native.GetCursorPos(out point))
+                UpdateCursor(point.x, point.y, Native.Desktop);
+        }
+        private void DrainWorkerEvents()
+        {
+            if (closing || drainingWorkerEvents) return;
+            string warning = null;
+            drainingWorkerEvents = true;
+            try
             {
-                int seconds = Math.Max(0, (int)Math.Ceiling((startAt - DateTime.UtcNow).TotalSeconds));
+                WorkerEvent e;
+                if (!worker.TryDequeue(out e)) return;
+                FeedbackBatch feedback = new FeedbackBatch();
+                do { HandleWorkerEvent(e, feedback, ref warning); }
+                while (worker.TryDequeue(out e));
+                if (!closing) PlayFeedback(feedback.Take(worker.StartVersion), false);
+            }
+            catch
+            {
+                if (!closing) worker.SetNotificationWindow(workerNotifications.Handle);
+                throw;
+            }
+            finally { drainingWorkerEvents = false; }
+            // A dialog has its own message loop. Show it after draining the batch.
+            if (!closing && warning != null && warning == status.Text) ShowErrorDialog(warning);
+        }
+        private void HandleWorkerEvent(WorkerEvent e, FeedbackBatch feedback, ref string warning)
+        {
+            feedback.Add(e.Cue, e.StartVersion);
+            if (e.Kind == "start")
+            {
+                if (e.StartVersion != worker.StartVersion) return;
+                CancelCountdown();
+                if (editing != null) { worker.Stop(WorkerReason.CloseEditor); return; }
+                try { worker.Start(GetProfile(), e.Window, e.StartVersion); }
+                catch (Exception ex) { warning = ex.Message; Error(warning, false); }
+            }
+            else if (e.Kind == "running") { SetRunning(true); status.Text = e.Text; }
+            else if (e.Kind == "stopped") { CancelCountdown(); SetRunning(false); status.Text = e.Text; if (e.Reason == WorkerReason.F12) actionPoint = null; }
+            else if (e.Kind == "error")
+            {
+                feedback.Clear(); actionPoint = null; CancelCountdown(); SetRunning(false);
+                warning = e.Text; Error(warning, false);
+            }
+            else if (e.Kind == "point")
+            {
+                if (actionPoint != null)
+                {
+                    Action<int, int> receive = actionPoint; actionPoint = null;
+                    receive(e.X, e.Y); SetRunning(false); return;
+                }
+                SetRunning(false); int row = SelectedRow();
+                grid.Rows[row].Cells["x"].Value = e.X; grid.Rows[row].Cells["y"].Value = e.Y;
+                picked.Text = L.F("第 {0} 行已取点：({1}, {2})", row + 1, e.X, e.Y);
+                Changed(this, EventArgs.Empty);
+                tray.ShowBalloonTip(1500, L.T("已读取鼠标坐标"), picked.Text, ToolTipIcon.Info);
+            }
+            else if (e.Kind == "key")
+            {
+                foreach (KeyValuePair<string, int> k in KeyCatalog.Keys)
+                    if (k.Value == e.Key) { grid.Rows[captureRow].Cells["key"].Value = k.Key; break; }
+                grid.Rows[captureRow].Cells["enabled"].Value = true;
+                status.Text = L.F("第 {0} 行按键已录入。", captureRow + 1);
+            }
+        }
+        private void TickCountdown(object sender, EventArgs args)
+        {
+            if (!countdownTimer.Enabled) return;
+            long remaining = 3000 - countdownClock.ElapsedMilliseconds;
+            if (remaining > 0)
+            {
+                int seconds = (int)((remaining + 999) / 1000);
                 start.Text = L.F("倒计时 {0} 秒（点击取消）", seconds);
-                if (seconds == 0)
-                {
-                    CancelCountdown();
-                    try
-                    {
-                        IntPtr target = Native.GetForegroundWindow();
-                        worker.Start(GetProfile(), target, countdownVersion);
-                        WindowState = FormWindowState.Minimized;
-                    }
-                    catch (Exception ex) { Error(ex.Message); }
-                }
+                countdownTimer.Interval = (int)(remaining - (seconds - 1) * 1000);
+                return;
             }
+            CancelCountdown();
+            if (countdownVersion != worker.StartVersion) return;
+            try
+            {
+                IntPtr target = Native.GetForegroundWindow();
+                worker.Start(GetProfile(), target, countdownVersion);
+                WindowState = FormWindowState.Minimized;
+            }
+            catch (Exception ex) { Error(ex.Message); }
         }
         private void UpdateCursor(int x, int y, Rectangle desktop)
         {
@@ -398,12 +457,15 @@ namespace KeyHoldMacro
             lastCursor = point; lastDesktop = desktop;
             cursor.Text = L.F("当前鼠标坐标：X = {0}    Y = {1}    |    当前桌面：{2}", x, y, desktop);
         }
-        private void CancelCountdown() { countdown = 0; start.Text = L.T("3 秒后启用并最小化"); }
+        private void CancelCountdown()
+        {
+            countdownTimer.Stop(); countdownClock.Reset(); start.Text = L.T("3 秒后启用并最小化");
+        }
         public void EmergencyStop()
         { EmergencyStop(true); }
         private void EmergencyStop(bool confirm)
         {
-            CancelCountdown(); if (worker != null) worker.Stop(L.T("已停止并请求释放鼠标。"), confirm);
+            CancelCountdown(); if (worker != null) worker.Stop(WorkerReason.Requested, confirm);
         }
         private void ChangeSound()
         {
@@ -431,8 +493,8 @@ namespace KeyHoldMacro
             status.Text = L.F("试听：{0}（不会启用宏）。", names[index]);
             PlayFeedback(cues[index], true);
         }
-        private void SessionChanged(object sender, SessionSwitchEventArgs e) { worker.Stop(L.T("会话发生变化，已暂停。")); }
-        private void PowerChanged(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Suspend) worker.Stop(L.T("系统休眠，已暂停。")); }
+        private void SessionChanged(object sender, SessionSwitchEventArgs e) { worker.Stop(WorkerReason.SessionChanged); }
+        private void PowerChanged(object sender, PowerModeChangedEventArgs e) { if (e.Mode == PowerModes.Suspend) worker.Stop(WorkerReason.Suspend); }
         private int SelectedRow() { return grid.CurrentCell == null ? 0 : grid.CurrentCell.RowIndex; }
         private static void UpdateCustom(DataGridViewRow row)
         {
@@ -454,7 +516,7 @@ namespace KeyHoldMacro
                 current.Key = key; current.X = x; current.Y = y;
                 using (MacroEditor dialog = new MacroEditor(current, delegate(Action<int, int> receive)
                 {
-                    worker.Stop(L.T("请切换到目标应用，按 F6 为个性化动作取点。")); actionPoint = receive;
+                    worker.Stop(WorkerReason.ActionPoint); actionPoint = receive;
                 }, delegate { actionPoint = null; }))
                 {
                     editing = dialog;
@@ -596,11 +658,15 @@ namespace KeyHoldMacro
             }
             catch (Exception ex) { status.Text = L.T("上次配置无法读取，请重新选择或导入：") + ex.Message; }
         }
-        private void Error(string message)
+        private void Error(string message, bool showDialog = true)
         {
             PlayFeedback(FeedbackCue.Error, false);
             status.Text = message; status.ForeColor = Palette.Danger;
             tray.ShowBalloonTip(4000, L.T("KeyHold：需要处理"), message, ToolTipIcon.Warning);
+            if (showDialog) ShowErrorDialog(message);
+        }
+        private void ShowErrorDialog(string message)
+        {
             if (Visible && WindowState != FormWindowState.Minimized)
                 MessageBox.Show(this, message, "KeyHold", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -609,9 +675,26 @@ namespace KeyHoldMacro
             if (closing) return;
             EmergencyStop(false);
             if (NextLanguage == null && e.CloseReason == CloseReason.UserClosing && !DiscardOrSave()) { e.Cancel = true; return; }
-            closing = true; timer.Stop();
-            SystemEvents.SessionSwitch -= SessionChanged; SystemEvents.PowerModeChanged -= PowerChanged;
-            worker.Dispose(); tray.Visible = false; tray.Dispose(); timer.Dispose();
+            DisposeBackground();
+        }
+        private void DisposeBackground()
+        {
+            if (closing) return;
+            closing = true;
+            cursorTimer.Dispose(); countdownTimer.Dispose();
+            if (worker != null)
+            {
+                SystemEvents.SessionSwitch -= SessionChanged; SystemEvents.PowerModeChanged -= PowerChanged;
+                worker.Dispose();
+            }
+            if (workerNotifications != null) workerNotifications.Dispose();
+            if (audio != null) audio.Dispose();
+            tray.Dispose();
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) DisposeBackground();
+            base.Dispose(disposing);
         }
     }
 }
