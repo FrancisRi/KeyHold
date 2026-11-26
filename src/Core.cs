@@ -2,7 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using System.Web.Script.Serialization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace KeyHoldMacro
 {
@@ -137,17 +138,30 @@ namespace KeyHoldMacro
 
     public static class ProfileStore
     {
+        private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            NumberHandling = JsonNumberHandling.AllowReadingFromString,
+            AllowTrailingCommas = true
+        };
+
         public static string Serialize(Profile p)
         {
-            p.Validate(); p.Version = 2; return new JavaScriptSerializer().Serialize(p);
+            p.Validate(); p.Version = 2; return JsonSerializer.Serialize(p, JsonOptions);
         }
+
+        internal static Profile Deserialize(string json)
+        {
+            Profile p = String.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<Profile>(json, JsonOptions);
+            if (p == null) throw new ArgumentException(L.T("配置文件为空。"));
+            p.Validate(); p.Version = 2; return p;
+        }
+
         public static Profile Read(string path)
         {
             if (new FileInfo(path).Length > 1024 * 1024)
                 throw new ArgumentException(L.T("配置文件超过 1 MB。"));
-            Profile p = new JavaScriptSerializer().Deserialize<Profile>(File.ReadAllText(path, Encoding.UTF8));
-            if (p == null) throw new ArgumentException(L.T("配置文件为空。"));
-            p.Validate(); p.Version = 2; return p;
+            return Deserialize(File.ReadAllText(path, Encoding.UTF8));
         }
         public static void Write(string path, Profile p)
         {

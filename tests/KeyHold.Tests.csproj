@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Suite Condition="'$(Suite)' == ''">CoreTests</Suite>
+    <StartupObject>$(Suite)</StartupObject>
+    <AssemblyName>$(Suite)</AssemblyName>
+    <DesktopSuite Condition="'$(Suite)' != 'CoreTests' and '$(Suite)' != 'WorkerTests'">true</DesktopSuite>
+    <ApplicationManifest Condition="'$(DesktopSuite)' == 'true'">..\app.manifest</ApplicationManifest>
+    <ApplicationIcon Condition="'$(DesktopSuite)' == 'true'">..\assets\KeyHold.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\src\Core.cs;..\src\Feedback.cs;..\src\Localization.cs;$(Suite).cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Suite)' == 'CoreTests'">
+    <Compile Include="LegacyEngine.cs;SequenceTests.cs;FeedbackTests.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Suite)' == 'WorkerTests'">
+    <Compile Include="LegacyEngine.cs;LegacyKeyboardWorker.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(DesktopSuite)' == 'true'">
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WindowsForms" />
+    <Compile Include="..\src\FluentUi.cs;..\src\MacroEditor.cs;..\src\Native.cs;..\src\KeyboardWorker.cs;LegacyMainForm.cs" />
+    <EmbeddedResource Include="..\assets\KeyHold.ico" LogicalName="KeyHold.AppIcon" />
+    <None Include="..\.build\rust-target\x86_64-pc-windows-gnu\release\keyhold_worker.dll"
+          Link="keyhold_worker.dll" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

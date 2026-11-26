@@ -1,5 +1,15 @@
 # 更新记录
 
+## 0.5.0 — 2026-11-26
+
+- 主窗口迁移到 WinUI 3。配置、键位映射和运行控制分区排布，使用 WinUI 默认圆角按钮、Mica 背景和带系统窗口按钮的标题栏。
+- 保留 Rust 宏引擎和个性化编辑器。现有 v1/v2 JSON、配置目录和语言、声音偏好可继续使用。
+- Windows 11 x64 便携包随附 .NET 8、Windows App SDK 和 Rust 后台。解压整个 ZIP 后运行 `KeyHold.exe`，程序默认暂停。
+
+验证了 24 项 Rust 测试、911 项 C# 检查，以及本机的暂停启动、15 行键位、JSON 导入导出和托盘恢复。真实键鼠输出与独占全屏仍需在目标应用中验证。
+
+English: The main window now uses WinUI 3, with rounded controls, a Mica backdrop and system caption buttons. Existing JSON profiles and preferences remain compatible. Extract the complete Windows 11 x64 portable ZIP and run `KeyHold.exe`. The package includes its runtimes and always starts paused.
+
 ## 0.4.0 — 2026-11-12
 
 - Windows x64 版本改用 Rust 执行宏状态机、低级键盘钩子、延迟调度和输入释放，保留 WinForms 界面及现有 JSON 配置。

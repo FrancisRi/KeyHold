@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Web.Script.Serialization;
 using KeyHoldMacro;
 
 internal sealed class FakeKeys : IKeyboardOutput

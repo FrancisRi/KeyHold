@@ -4,7 +4,7 @@
 
 适用于 **Windows 11** 的后台按键与鼠标宏工具。将一个按键映射到屏幕坐标，按住时保持鼠标左键；也可以为每个键编排前置、后置动作及时间间隔。
 
-KeyHold 使用 C# WinForms（.NET Framework 4.8）界面和 Rust 后台。宏状态机、键盘钩子、动作调度及模拟输入由 Rust 执行。程序启动时始终暂停，不显示游戏内覆盖层。
+KeyHold 使用 WinUI 3 主窗口和 Rust 后台。宏状态机、键盘钩子、动作调度及模拟输入由 Rust 执行。程序启动时始终暂停，不显示游戏内覆盖层。
 
 ## 功能
 
@@ -18,17 +18,17 @@ KeyHold 使用 C# WinForms（.NET Framework 4.8）界面和 Rust 后台。宏状
 - 简体中文 / English 界面，首次按系统语言选择，并记住手动选择。
 - 全屏状态提示音：区分启用、暂停、紧急停止和错误，支持关闭、记住设置及安全试听。
 
-![KeyHold 深色主界面](docs/screenshots/main-dark.png)
+![KeyHold v0.4.0 深色主界面](docs/screenshots/main-dark.png)
 
 ![每键个性化设置](docs/screenshots/editor-dark.png)
 
-浅色预览：[主界面](docs/screenshots/main-light.png) · [个性化设置](docs/screenshots/editor-light.png)。
+v0.4.0 浅色预览：[主界面](docs/screenshots/main-light.png) · [个性化设置](docs/screenshots/editor-light.png)。
 
 ## 获取与运行
 
-下载 [KeyHold v0.4.0 Windows x64 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.4.0/KeyHold-v0.4.0-win-x64.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
+下载 [KeyHold v0.5.0 Windows x64 便携版 ZIP](https://github.com/FrancisRi/KeyHold/releases/download/v0.5.0/KeyHold-v0.5.0-win-x64.zip)，或在 [Releases](https://github.com/FrancisRi/KeyHold/releases) 查看版本说明及 SHA-256 校验文件。也可以下载源码后自行编译。
 
-系统要求：Windows 11 x64、.NET Framework 4.8。便携版包含 Rust 后台，解压后请将 `KeyHold.exe`、`KeyHold.exe.config` 和 `keyhold_worker.dll` 放在同一目录。
+系统要求为 Windows 11 x64。便携包随附 .NET 8、Windows App SDK 和 Rust 后台，解压及移动时保留整个目录。
 
 1. 将发行包解压到普通文件夹。
 2. 双击 `KeyHold.exe`，程序以暂停状态打开。
@@ -36,7 +36,7 @@ KeyHold 使用 C# WinForms（.NET Framework 4.8）界面和 Rust 后台。宏状
 4. 保存配置，切到目标应用后按 F8 启用。
 5. 按住宏键执行；按 F12 可随时紧急停止并释放程序按下的输入。
 
-右上角可选择简体中文或 English。切换时先暂停，提示保存未保存的配置，再重新打开配置窗口；新窗口仍为暂停状态。已有配置名称、备注和 JSON 动作标识保持原样。系统原生文件对话框和消息框按钮的语言由 Windows 决定。
+右上角可选择简体中文或 English。切换时先暂停，提示处理未保存的配置。已有配置名称、备注和 JSON 动作标识保持原样。
 
 | 快捷键 | 功能 |
 | --- | --- |
@@ -59,7 +59,7 @@ E、F 分别映射到两个坐标：
 
 ## 从源码构建
 
-在原生 Windows PowerShell 中安装 [rustup](https://rustup.rs/) 的 x64 GNU 工具链，然后构建：
+安装 x64 .NET 8 SDK 和 [rustup](https://rustup.rs/)，然后在原生 Windows PowerShell 中构建：
 
 ```powershell
 git clone https://github.com/FrancisRi/KeyHold.git
@@ -69,7 +69,7 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\Start.cmd
 ```
 
-`Build.cmd` 构建 Rust DLL 和 x64 WinForms EXE；工具链安装后可离线构建。`Start.cmd` 在缺少 EXE 或 DLL 时先构建。两者所用的构建入口为 `tools/Build.ps1`，可直接调用以跳过脚本的等待按键步骤。
+`Build.cmd` 将 WinUI 3、.NET 8 和 Rust 后台发布到 `.build\winui`。首次构建需要访问 NuGet。`Start.cmd` 从该目录启动新版，也可以直接运行其中的 `KeyHold.exe`。便携分发时复制整个目录。无人值守构建可直接执行 `.\tools\Build.ps1`。
 
 ## 测试
 
@@ -81,14 +81,17 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 
 - Rust 引擎、后台逻辑和原生接口：24 项测试，使用假输入及虚拟时钟验证关键行为。
 - C# 参考引擎及配置、提示音：292 项检查；C# 参考后台：32 项假 Win32 检查。参考引擎和后台只参与测试。
-- WinForms 和桥接：587 项检查，覆盖界面、命令快照、状态回执及真实 DLL 加载；需要 Windows 桌面环境。
+- 个性化编辑器、旧主窗口回归和 Rust 桥接：587 项检查，需 Windows 桌面环境。
+
+`tests/WinUiStartup.ps1` 可检查已打开并暂停的 WinUI 3 主窗口，包括标题栏、15 行键位、实时坐标以及本地运行库加载。
 
 `tests/ScrollInteractionTests.cs` 和 `tests/StartupPaintTests.cs` 是可选桌面验证，不包含在默认测试中。前者会移动真实鼠标并仅拖动无宏监听预览里的滚动条；后者显示预览并捕获启动、按键选择后全屏窗口遮挡/最小化恢复及连续悬停帧（无边框窗口模拟遮挡，不模拟独占显示模式切换）。运行可选验证时应保持测试窗口不受遮挡。
 
 ## 项目结构
 
 ```text
-src/             WinForms 界面、配置存储、提示音和 DLL 桥接
+MainWindow.xaml  WinUI 3 主窗口布局
+src/             主窗口逻辑、个性化编辑器、配置存储、提示音和 DLL 桥接
 rust/            Rust 宏引擎、Windows 输入后台及其测试
 tests/           C# 参考引擎、配置及界面验证
 examples/        示例 JSON 配置，使用前须重新取点

@@ -6,8 +6,7 @@ using System.Text;
 
 namespace KeyHoldMacro
 {
-    // Language is changed only between main-window lifetimes, after the worker
-    // has been disposed. Translation never performs IO in input callbacks.
+    // Language changes on the paused UI thread. Translation performs no IO.
     internal static class L
     {
         private static string language = "zh-CN";
@@ -77,6 +76,10 @@ namespace KeyHoldMacro
             { "F6 取点   ·   F8 启停   ·   F12 急停", "F6 Capture  ·  F8 Toggle  ·  F12 Stop" },
             { "配置文件", "Profiles" },
             { "已存配置", "Saved profile" },
+            { "第 {0} 行 · {1}", "Row {0} · {1}" },
+            { "放弃修改", "Discard changes" },
+            { "覆盖", "Overwrite" },
+            { "JSON 配置", "JSON profile" },
             { "读取", "Load" },
             { "新建", "New" },
             { "新配置", "New profile" },

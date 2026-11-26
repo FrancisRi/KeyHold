@@ -69,8 +69,7 @@ namespace KeyHoldMacro
         public void Start(Profile profile, IntPtr foreground, int version)
         {
             // Snapshot the profile before crossing threads.
-            Profile copy = new System.Web.Script.Serialization.JavaScriptSerializer()
-                .Deserialize<Profile>(ProfileStore.Serialize(profile));
+            Profile copy = ProfileStore.Deserialize(ProfileStore.Serialize(profile));
             Post(delegate
             {
                 if (!CurrentStart(version)) return;

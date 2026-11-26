@@ -4,7 +4,7 @@
 
 A background keyboard and mouse macro tool for **Windows 11**. Map a single key to a screen coordinate: pressing it moves the cursor and holds the left mouse button; releasing it releases the button. Add before-actions and after-actions to customize each key.
 
-KeyHold uses C# WinForms (.NET Framework 4.8) with a Rust worker for the macro engine, keyboard hook, scheduling and simulated input. **KeyHold always starts paused** and runs without an in-game overlay.
+KeyHold uses a WinUI 3 main window and a Rust worker for the macro engine, keyboard hook, scheduling and simulated input. **KeyHold always starts paused** and runs without an in-game overlay.
 
 ## Features
 
@@ -17,15 +17,15 @@ KeyHold uses C# WinForms (.NET Framework 4.8) with a Rust worker for the macro e
 - English and Simplified Chinese UI, including customization, tray menus, status messages and validation errors.
 - Distinct sound cues for enabled, paused, emergency-stop and error states, with a persistent mute option and safe audition.
 
-![English main window](docs/screenshots/main-en-dark.png)
+![English main window in v0.4.0](docs/screenshots/main-en-dark.png)
 
 ![English key customization](docs/screenshots/editor-en-dark.png)
 
 ## Download and use
 
-Download [KeyHold v0.4.0 portable ZIP for Windows x64](https://github.com/FrancisRi/KeyHold/releases/download/v0.4.0/KeyHold-v0.4.0-win-x64.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
+Download [KeyHold v0.5.0 portable ZIP for Windows x64](https://github.com/FrancisRi/KeyHold/releases/download/v0.5.0/KeyHold-v0.5.0-win-x64.zip). Release notes and SHA-256 checksums are available in [Releases](https://github.com/FrancisRi/KeyHold/releases).
 
-Requires Windows 11 x64 and .NET Framework 4.8. Extract the complete ZIP and run `KeyHold.exe` alongside `KeyHold.exe.config` and `keyhold_worker.dll`.
+Requires Windows 11 x64. Extract the complete ZIP and run `KeyHold.exe` from that folder. The package includes .NET 8, the Windows App SDK and the Rust worker.
 
 1. Enter a profile name and choose a macro key.
 2. Select its row, position the cursor in the target application and press **F6** to capture the point.
@@ -43,7 +43,7 @@ These three keys are reserved. Minimize the window to keep KeyHold in the tray; 
 
 Sound cues are enabled by default: two ascending notes confirm a successful start, two descending notes announce a pause, and distinct three-note cues identify emergency stops and errors. A failed or canceled start never announces success. F6 and ordinary settings operations stay silent when macros are already paused. The **Sound cues** switch remembers your choice across profiles and restarts. **Test sound** cycles through all four cues without enabling macros; this explicit preview also works when automatic sounds are muted. Volume follows KeyHold's application volume in Windows. Verify that the cues are audible through your chosen output device in the target fullscreen application.
 
-Choose **English** or **简体中文** in the upper-right language selector. On first launch, Chinese Windows UI cultures select Simplified Chinese; other cultures select English. Your choice is saved for later launches. Changing language pauses macros, offers to save unsaved changes, then reopens settings in the chosen language, still paused. Profile names and notes are user data and are never translated. Native file-dialog controls and message-box buttons follow the Windows language.
+Choose **English** or **简体中文** in the upper-right language selector. On first launch, Chinese Windows UI cultures select Simplified Chinese; other cultures select English. Your choice is saved for later launches. Changing language pauses macros, prompts for unsaved changes, then updates the main window. Profile names and notes retain their original text. Native file dialogs follow the Windows language.
 
 ## Behavior and timing
 
@@ -59,7 +59,7 @@ Coordinates are physical desktop pixels. Capture them again after changing the d
 
 ## Build and test
 
-Install [rustup](https://rustup.rs/), then run in native Windows PowerShell:
+Install the x64 .NET 8 SDK and [rustup](https://rustup.rs/), then run in native Windows PowerShell:
 
 ```powershell
 git clone https://github.com/FrancisRi/KeyHold.git
@@ -70,9 +70,11 @@ rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
 .\Start.cmd
 ```
 
-The build uses the Rust x64 GNU toolchain and the .NET Framework C# compiler. It runs offline after the toolchain is installed. The `.cmd` build and test scripts pause before returning; invoke `tools/Build.ps1` directly for an unattended build, or pass `-Test` for the suite.
+The build publishes the WinUI 3 app, .NET 8 runtime and Rust worker to `.build\winui`. The first build restores packages from NuGet. Start the new app with `Start.cmd` or run `KeyHold.exe` in that directory. Keep the entire output folder together for portable use. Invoke `tools/Build.ps1` directly for an unattended build, or pass `-Test` for the suite.
 
-The default suites run **24 Rust tests** and **911 C# checks** (292 reference engine and profile/feedback checks, 32 reference worker checks, 587 UI and bridge checks). The old C# engine and worker are test references only. Tests use fake input and audio; the DLL-loading check does not install a keyboard hook. UI checks need a Windows desktop. Existing version 1/2 JSON profiles remain compatible.
+The default suites run **24 Rust tests** and **911 C# checks** (292 reference engine and profile/feedback checks, 32 reference worker checks, 587 editor, legacy-window and bridge checks). The old C# engine and worker are test references only. Tests use fake input and audio; the DLL-loading check does not install a keyboard hook. UI checks need a Windows desktop. Existing version 1/2 JSON profiles remain compatible.
+
+Run `tests/WinUiStartup.ps1` while the new configuration window is open and paused to check the title bar, 15 mapping rows, live cursor coordinates, and local runtime modules.
 
 Optional desktop checks are separate from `Test.cmd`: `ScrollInteractionTests.cs` moves the real cursor only inside its own preview; `StartupPaintTests.cs` displays preview windows and captures startup and restore/hover frames after key selection and a borderless fullscreen cover (not an exclusive display-mode switch). Both use previews without macro listeners.
 
